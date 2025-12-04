@@ -37,6 +37,11 @@ export interface Checkpoint {
   files: Record<string, File>;
 }
 
+export interface FileAction {
+  action: 'create' | 'update' | 'delete';
+  path: string;
+}
+
 export interface ChatMessage {
   clientId: string; // Client-side unique ID for optimistic updates
   id?: string; // DB UUID, available after save
@@ -49,8 +54,8 @@ export interface ChatMessage {
   analysisText?: string;
   attachments?: { name: string; type: string; dataUrl: string }[];
   model?: string;
-  completedFiles?: string[];
-  streamingCompletedFiles?: string[];
+  completedFiles?: FileAction[];
+  streamingCompletedFiles?: FileAction[];
   isApplyingChanges?: boolean;
   liveStream?: {
     currentFile: string;

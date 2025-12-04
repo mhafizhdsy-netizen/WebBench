@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { File, ChatMessage, ChatSession } from '../../types';
+import { File, ChatMessage, ChatSession, FileAction } from '../../types';
 import { Button } from '../ui/Button';
 import { generateSuggestions } from '../../services/geminiService';
-import { Send, Sparkles, X, Bot, User as UserIcon, ArrowDown, Loader2, Lightbulb, RefreshCw, ChevronRight, Paperclip, FileText, Cpu, CheckCircle2, LinkIcon, History, Plus, ChevronDown, Square, Trash2, MoreVertical, AlertTriangle } from 'lucide-react';
+import { Send, Sparkles, X, Bot, User as UserIcon, ArrowDown, Loader2, Lightbulb, RefreshCw, ChevronRight, Paperclip, FileText, Cpu, CheckCircle2, LinkIcon, History, Plus, ChevronDown, Square, Trash2, MoreVertical, AlertTriangle, Edit, XCircle } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -28,7 +28,7 @@ const CodeBlock = React.memo(({ className, children, msg }: any) => {
   const path = pathMatch ? pathMatch[1] : null;
 
   // Check if this file path is in the message's completedFiles
-  const isFileApplied = path && msg?.completedFiles?.includes(path);
+  const isFileApplied = path && msg?.completedFiles?.some((f: FileAction) => f.path === path);
 
   return (
     <div className="my-2 border border-border bg-background rounded-lg overflow-auto no-scrollbar">
@@ -133,6 +133,33 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({ message: msg, onCont
       </div>
     );
   }
+  
+  const renderFileActionBadge = (action: FileAction) => {
+    const { path, action: type } = action;
+
+    if (type === 'create') {
+      return (
+        <div key={path} className="text-xs text-green-300 bg-green-900/40 px-2 py-1.5 rounded-md font-mono flex items-center gap-2 border border-green-500/20">
+          <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 text-green-400" /> Created: {path}
+        </div>
+      );
+    }
+    if (type === 'update') {
+      return (
+        <div key={path} className="text-xs text-sky-300 bg-sky-900/40 px-2 py-1.5 rounded-md font-mono flex items-center gap-2 border border-sky-500/20">
+          <Edit className="w-3 h-3 md:w-3.5 md:h-3.5 text-sky-400" /> Modified: {path}
+        </div>
+      );
+    }
+    if (type === 'delete') {
+      return (
+        <div key={path} className="text-xs text-red-300 bg-red-900/40 px-2 py-1.5 rounded-md font-mono flex items-center gap-2 border border-red-500/20">
+          <XCircle className="w-3 h-3 md:w-3.5 md:h-3.5 text-red-400" /> Deleted: {path}
+        </div>
+      );
+    }
+    return null;
+  };
 
   return (
     <div onContextMenu={(e) => onContextMenu(e, msg)} className={`flex flex-col w-full animate-fade-in group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -194,11 +221,7 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({ message: msg, onCont
                               <LiveCodeRenderer stream={msg.liveStream} />
                               {msg.streamingCompletedFiles && msg.streamingCompletedFiles.length > 0 && (
                                   <div className="mt-2 space-y-1">
-                                      {msg.streamingCompletedFiles.map(file => (
-                                      <div key={file} className="text-xs text-green-300 bg-green-900/40 px-2 py-1.5 rounded-md font-mono flex items-center gap-2 border border-green-500/20 animate-fade-in">
-                                          <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 text-green-400" /> Generated: {file}
-                                      </div>
-                                      ))}
+                                      {msg.streamingCompletedFiles.map(renderFileActionBadge)}
                                   </div>
                               )}
                           </>
@@ -215,11 +238,7 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({ message: msg, onCont
               )}
               {!msg.isLoading && msg.completedFiles && msg.completedFiles.length > 0 && (
                   <div className="mt-2 space-y-1">
-                      {msg.completedFiles.map(file => (
-                      <div key={file} className="text-xs text-green-300 bg-green-900/40 px-2 py-1.5 rounded-md font-mono flex items-center gap-2 border border-green-500/20">
-                          <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 text-green-400" /> Generated: {file}
-                      </div>
-                      ))}
+                      {msg.completedFiles.map(renderFileActionBadge)}
                   </div>
               )}
               {msg.sources && msg.sources.length > 0 && (
@@ -273,8 +292,8 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({ message: msg, onCont
         prev.isApplyingChanges === next.isApplyingChanges &&
         prev.liveStream?.currentCode === next.liveStream?.currentCode &&
         prev.liveStream?.currentFile === next.liveStream?.currentFile &&
-        (prev.streamingCompletedFiles || []).length === (next.streamingCompletedFiles || []).length &&
-        (prev.completedFiles || []).length === (next.completedFiles || []).length
+        JSON.stringify(prev.streamingCompletedFiles) === JSON.stringify(next.streamingCompletedFiles) &&
+        JSON.stringify(prev.completedFiles) === JSON.stringify(next.completedFiles)
     );
 });
 

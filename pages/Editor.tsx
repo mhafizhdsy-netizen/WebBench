@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { projectService } from '../services/projectService';
-import { Project, File as ProjectFile, PanelType, ChatMessage, ChatSession, Checkpoint } from '../types';
+import { Project, File as ProjectFile, PanelType, ChatMessage, ChatSession, Checkpoint, FileAction } from '../types';
 import { CodeEditor } from '../components/editor/CodeEditor';
 import { Preview } from '../components/editor/Preview';
 import { AIChat } from '../components/editor/AIChat';
@@ -233,53 +233,57 @@ const Editor: React.FC = () => {
     window.URL.revokeObjectURL(url);
   };
 
-  const handleAIChanges = (filesToProcess: any[]): Promise<string[]> => {
+  const handleAIChanges = (filesToProcess: any[], initialFilePaths: Set<string>): Promise<FileAction[]> => {
     if (!project || !projectId) return Promise.resolve([]);
     let updatedFiles = { ...project.files };
-    const changedPaths: string[] = [];
+    const changedFileActions: FileAction[] = [];
     let newOpenFiles = [...openFiles];
 
     filesToProcess.forEach((f: any) => {
-        const path = f.path.startsWith('/') ? f.path : '/' + f.path;
-        changedPaths.push(path); // Always record the path being acted upon.
+      const path = f.path.startsWith('/') ? f.path : '/' + f.path;
+      const actionFromAI = f.action as 'create' | 'update' | 'delete';
 
-        if (f.action === 'delete') {
-            Object.keys(updatedFiles).forEach(key => {
-                // Delete the file itself, or if it's a folder, delete everything inside it.
-                if (key === path || key.startsWith(path + '/')) {
-                    delete updatedFiles[key];
-                    if (activeFile === key) setActiveFile(null);
-                    newOpenFiles = newOpenFiles.filter(op => op !== key);
-                }
-            });
-        } else { // 'create' or 'update'
-            if (f.type === 'folder') {
-                const folderPath = path.endsWith('/') ? path.slice(0, -1) : path;
-                const keepFilePath = `${folderPath}/.keep`;
-                if (!updatedFiles[keepFilePath]) {
-                    updatedFiles[keepFilePath] = {
-                        path: keepFilePath, name: '.keep',
-                        type: 'plaintext', content: '',
-                        lastModified: Date.now()
-                    };
-                }
-            } else {
-                updatedFiles[path] = {
-                    path, name: path.split('/').pop()!,
-                    type: f.type || 'plaintext', content: f.content || '',
-                    lastModified: Date.now()
-                };
-                if (!newOpenFiles.includes(path) && newOpenFiles.length < 10) {
-                    newOpenFiles.push(path);
-                }
-                if (!activeFile) {
-                    setActiveFile(path);
-                }
-            }
+      if (actionFromAI === 'delete') {
+        changedFileActions.push({ action: 'delete', path });
+        Object.keys(updatedFiles).forEach(key => {
+          if (key === path || key.startsWith(path + '/')) {
+            delete updatedFiles[key];
+            if (activeFile === key) setActiveFile(null);
+            newOpenFiles = newOpenFiles.filter(op => op !== key);
+          }
+        });
+      } else { // 'create' or 'update'
+        const fileExisted = initialFilePaths.has(path);
+        const effectiveAction = fileExisted ? 'update' : 'create';
+        changedFileActions.push({ action: effectiveAction, path });
+        
+        if (f.type === 'folder') {
+          const folderPath = path.endsWith('/') ? path.slice(0, -1) : path;
+          const keepFilePath = `${folderPath}/.keep`;
+          if (!updatedFiles[keepFilePath]) {
+            updatedFiles[keepFilePath] = {
+              path: keepFilePath, name: '.keep',
+              type: 'plaintext', content: '',
+              lastModified: Date.now()
+            };
+          }
+        } else {
+          updatedFiles[path] = {
+            path, name: path.split('/').pop()!,
+            type: f.type || 'plaintext', content: f.content || '',
+            lastModified: Date.now()
+          };
+          if (!newOpenFiles.includes(path) && newOpenFiles.length < 10) {
+            newOpenFiles.push(path);
+          }
+          if (!activeFile) {
+            setActiveFile(path);
+          }
         }
+      }
     });
 
-    setHighlightedFiles(new Set(changedPaths));
+    setHighlightedFiles(new Set(changedFileActions.map(a => a.path)));
     setTimeout(() => setHighlightedFiles(new Set()), 4000);
 
     setProject({ ...project, files: updatedFiles });
@@ -288,7 +292,7 @@ const Editor: React.FC = () => {
         setActiveFile(newOpenFiles.length > 0 ? newOpenFiles[newOpenFiles.length - 1] : null);
     }
     setRefreshTrigger(p => p + 1);
-    return Promise.resolve(changedPaths);
+    return Promise.resolve(changedFileActions);
   };
 
   const updateMessageInState = (sessionId: string, message: ChatMessage) => {
@@ -314,6 +318,7 @@ const Editor: React.FC = () => {
     
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
+    const initialFilePaths = new Set(Object.keys(project.files));
 
     try {
       // --- Client-side Analysis Simulation ---
@@ -356,9 +361,12 @@ const Editor: React.FC = () => {
           }
         }
         
-        // Find all completed code blocks from the full stream text
         const completedBlocks = [...fullText.matchAll(FILE_CODE_BLOCK_FULL_REGEX)];
-        const completedFilesInStream = completedBlocks.map(match => match[1]);
+        const completedActionsInStream: FileAction[] = completedBlocks.map(match => {
+            const path = match[1];
+            const action = initialFilePaths.has(path) ? 'update' : 'create';
+            return { action, path };
+        });
 
         // Temporarily remove completed blocks to find the live one
         let textForLiveParsing = fullText;
@@ -401,7 +409,7 @@ const Editor: React.FC = () => {
         const updatedMsg: Partial<ChatMessage> = { 
             content: contentForMarkdown,
             liveStream: currentLiveStreamData,
-            streamingCompletedFiles: completedFilesInStream,
+            streamingCompletedFiles: completedActionsInStream,
             isApplyingChanges: jsonBlockDetected,
             isLoading: true,
         };
@@ -413,7 +421,7 @@ const Editor: React.FC = () => {
       
       let finalContentForMessage = fullText.replace(FILE_CODE_BLOCK_FULL_REGEX, '').replace(jsonBlockRegex, '').trim();
 
-      let completedPaths: string[] = [];
+      let completedActions: FileAction[] = [];
       let isError = false;
       let errorContent = '';
       
@@ -423,7 +431,7 @@ const Editor: React.FC = () => {
           const sanitizedJson = jsonMatch[1].trim().replace(/,(?=\s*?[\}\]])/g, '');
           const response = JSON.parse(sanitizedJson);
           if (response.files && Array.isArray(response.files) && response.files.length > 0) {
-            completedPaths = await handleAIChanges(response.files);
+            completedActions = await handleAIChanges(response.files, initialFilePaths);
           }
         } catch (e: any) {
           console.error("Failed to parse AI JSON response", e, "Raw JSON:", jsonMatch[1]);
@@ -431,7 +439,20 @@ const Editor: React.FC = () => {
           errorContent = `Sorry, I couldn't process the file changes due to a formatting error in my response. Here's my explanation:\n\n${fullText.replace(jsonBlockRegex, '')}\n\n**Faulty JSON block:**\n\`\`\`json\n${jsonMatch[1]}\n\`\`\``;
         }
       } else {
-        completedPaths = [...fullText.matchAll(FILE_CODE_BLOCK_FULL_REGEX)].map(match => match[1]);
+        const matches = [...fullText.matchAll(FILE_CODE_BLOCK_FULL_REGEX)];
+        if (matches.length > 0) {
+          const filesToProcess = matches.map(match => {
+            const path = match[1];
+            const fullBlock = match[0];
+            const content = fullBlock
+              .replace(/```[a-zA-Z]*\s*\n(?:<!--|\/\/|\/\*)\s*.*?\s*(\*\/)?\s*\n/, '')
+              .replace(/```\s*$/, '');
+            const typeMatch = path.match(/\.([^.]+)$/);
+            const type = typeMatch ? typeMatch[1] : 'plaintext';
+            return { action: initialFilePaths.has(path) ? 'update' : 'create', path, content, type };
+          });
+          completedActions = await handleAIChanges(filesToProcess, initialFilePaths);
+        }
       }
       
       const finalSources = Array.from(sources, ([uri, title]) => ({ uri, title }));
@@ -444,7 +465,7 @@ const Editor: React.FC = () => {
           isApplyingChanges: false, 
           sources: finalSources, 
           content: isError ? errorContent : finalContentForMessage,
-          completedFiles: isError ? [] : completedPaths,
+          completedFiles: isError ? [] : completedActions,
           isError: isError
       };
       
