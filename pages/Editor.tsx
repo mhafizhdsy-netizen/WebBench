@@ -41,9 +41,9 @@ const Editor: React.FC = () => {
   const [isCheckpointModalOpen, setIsCheckpointModalOpen] = useState(false);
   
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [showPreview, setShowPreview] = useState(true);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
+  const [showPreview, setShowPreview] = useState(true);
   const [mobileTab, setMobileTab] = useState<PanelType>('editor');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [highlightedFiles, setHighlightedFiles] = useState<Set<string>>(new Set());
@@ -71,14 +71,15 @@ const Editor: React.FC = () => {
   useEffect(() => {
     const handleResize = () => {
       const newIsMobile = window.innerWidth < 768;
-      setIsMobile(newIsMobile);
-      // Automatically close sidebar on mobile, keep open on desktop
-      setIsSidebarOpen(!newIsMobile);
+      if (newIsMobile !== isMobile) {
+        setIsMobile(newIsMobile);
+        // Automatically close sidebar when switching to mobile, open on desktop
+        setIsSidebarOpen(!newIsMobile);
+      }
     };
     window.addEventListener('resize', handleResize);
-    handleResize(); // Initial check
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [isMobile]);
 
   const loadInitialData = useCallback(async () => {
     if (!projectId) {

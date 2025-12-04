@@ -433,7 +433,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
             const sourceName = draggedPath.split('/').pop();
             if (sourceName) {
                 const newPath = dragOverPath === '/' ? `/${sourceName}` : `${dragOverPath}/${sourceName}`;
-                if (newPath !== draggedPath) {
+                if (newPath !== draggedPath && !newPath.startsWith(draggedPath + '/')) {
                     onRename(draggedPath, newPath);
                 }
             }
