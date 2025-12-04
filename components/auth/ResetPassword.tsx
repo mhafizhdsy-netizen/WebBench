@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { supabase } from '../../services/supabaseClient';
+import { projectService } from '../../services/projectService';
 import { Button } from '../ui/Button';
 import { X, Loader2, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 
@@ -22,15 +22,15 @@ const ResetPassword: React.FC<ResetPasswordProps> = ({ onDone }) => {
     setError(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.updateUser({ password });
-
-    if (error) {
-      setError(error.message);
-    } else {
+    try {
+      await projectService.updateUserPassword(password);
       setSuccess(true);
       setTimeout(onDone, 3000); // Close modal after 3 seconds on success
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (

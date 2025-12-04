@@ -4,7 +4,7 @@ import { Button } from '../ui/Button';
 import { X, Loader2 } from 'lucide-react';
 
 export interface ActionModalConfig {
-  type: 'rename' | 'duplicate' | 'delete';
+  type: 'rename' | 'duplicate' | 'delete' | 'createCheckpoint';
   project: Project;
 }
 
@@ -24,8 +24,10 @@ export const ActionModal: React.FC<ActionModalProps> = ({ isOpen, config, onClos
     if (config) {
       if (config.type === 'duplicate') {
         setInputValue(`${config.project.name} Copy`);
-      } else {
+      } else if (config.type === 'rename') {
         setInputValue(config.project.name);
+      } else {
+        setInputValue('');
       }
       if (config.type !== 'delete') {
         setTimeout(() => {
@@ -51,14 +53,25 @@ export const ActionModal: React.FC<ActionModalProps> = ({ isOpen, config, onClos
   const titles = {
     rename: 'Rename Project',
     duplicate: 'Duplicate Project',
-    delete: 'Confirm Deletion'
+    delete: 'Confirm Deletion',
+    createCheckpoint: 'Create New Checkpoint'
   };
 
   const confirmText = {
     rename: 'Rename',
     duplicate: 'Duplicate',
-    delete: 'Delete'
+    delete: 'Delete',
+    createCheckpoint: 'Create'
   };
+  
+  const getInputLabel = () => {
+    switch (config.type) {
+        case 'rename': return 'Project Name';
+        case 'duplicate': return 'New Project Name';
+        case 'createCheckpoint': return 'Checkpoint Name';
+        default: return '';
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -69,15 +82,16 @@ export const ActionModal: React.FC<ActionModalProps> = ({ isOpen, config, onClos
         </div>
         <form onSubmit={handleSubmit}>
           <div className="p-6">
-            {(config.type === 'rename' || config.type === 'duplicate') && (
+            {(config.type === 'rename' || config.type === 'duplicate' || config.type === 'createCheckpoint') && (
               <>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Project Name</label>
+                <label className="block text-sm font-medium text-gray-400 mb-2">{getInputLabel()}</label>
                 <input
                   ref={inputRef}
                   type="text"
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   className="w-full bg-[#3c3c3c] border border-transparent focus:border-accent text-white rounded px-3 py-2 outline-none"
+                  placeholder={config.type === 'createCheckpoint' ? 'e.g., Initial commit' : 'Project name'}
                 />
               </>
             )}

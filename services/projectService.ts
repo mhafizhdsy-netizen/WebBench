@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { Project, File } from '../types';
+import { Project, File, ChatMessage, ChatSession, Checkpoint } from '../types';
 
 const INITIAL_PROJECT_FILES: Record<string, File> = {
   '/index.html': {
@@ -325,106 +325,398 @@ console.log("WebBench Starter Loaded");`,
 };
 
 export const projectService = {
-  // Auth Wrappers
+  // --- Auth Wrappers ---
   async getCurrentUser() {
-    const { data: { user } } = await supabase.auth.getUser();
-    return user;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      return user;
+    } catch (error) {
+      console.error("Error getting current user:", error);
+      throw new Error("Could not verify user session. Please try logging in again.");
+    }
+  },
+
+  async signInWithPassword(email, password) {
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Sign in error:", error);
+      throw new Error(error.message || "Failed to sign in. Please check your credentials.");
+    }
+  },
+
+  async signUp(email, password) {
+    try {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Sign up error:", error);
+      throw new Error(error.message || "Failed to create account. Please try again.");
+    }
+  },
+
+  async signInWithOAuth(provider) {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: `${window.location.origin}/#/dashboard`,
+        },
+      });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("OAuth sign in error:", error);
+      throw new Error(error.message || `Failed to sign in with ${provider}.`);
+    }
+  },
+
+  async resetPasswordForEmail(email) {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/`,
+      });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Password reset error:", error);
+      throw new Error(error.message || "Failed to send password reset email.");
+    }
+  },
+
+  async updateUserPassword(password: string) {
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Password update error:", error);
+      throw new Error(error.message || "Failed to update password.");
+    }
   },
 
   async signOut() {
-    return await supabase.auth.signOut();
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Sign out error:", error);
+      throw new Error("Failed to sign out.");
+    }
   },
 
-  // Project CRUD
+  // --- Project CRUD ---
   async getProjects(): Promise<Project[]> {
-    const { data, error } = await supabase
-      .from('projects')
-      .select('*')
-      .order('updated_at', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .order('updated_at', { ascending: false });
 
-    if (error) throw error;
-    
-    // Map DB casing to frontend camelCase if needed, but schema matches mostly.
-    // Ensure files is parsed if string (Supabase returns JSON object usually)
-    return data.map((p: any) => ({
-      ...p,
-      createdAt: new Date(p.created_at).getTime(),
-      updatedAt: new Date(p.updated_at).getTime(),
-      files: p.files || {}
-    }));
+      if (error) throw error;
+      return data.map((p: any) => ({
+        ...p,
+        createdAt: new Date(p.created_at).getTime(),
+        updatedAt: new Date(p.updated_at).getTime(),
+        files: p.files || {}
+      }));
+    } catch (error: any) {
+      console.error("Error fetching projects:", error);
+      throw new Error(`Could not load projects: ${error.message}`);
+    }
   },
 
   async getProject(id: string): Promise<Project | null> {
-    const { data, error } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('id', id)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (error) throw error;
 
-    if (error) return null;
-
-    return {
-      ...data,
-      createdAt: new Date(data.created_at).getTime(),
-      updatedAt: new Date(data.updated_at).getTime(),
-      files: data.files || {}
-    };
+      return {
+        ...data,
+        createdAt: new Date(data.created_at).getTime(),
+        updatedAt: new Date(data.updated_at).getTime(),
+        files: data.files || {}
+      };
+    } catch (error: any) {
+      console.error(`Error fetching project ${id}:`, error);
+      if (error.code === 'PGRST116') {
+        throw new Error("Project not found. It may have been deleted.");
+      }
+      throw new Error(`Could not load the project: ${error.message}`);
+    }
   },
 
   async createProject(name: string, files = INITIAL_PROJECT_FILES): Promise<Project> {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error("User not authenticated");
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("User not authenticated");
 
-    const { data, error } = await supabase
-      .from('projects')
-      .insert({
-        user_id: user.id,
-        name,
-        files: files
-      })
-      .select()
-      .single();
+      const { data, error } = await supabase
+        .from('projects')
+        .insert({ user_id: user.id, name, files })
+        .select()
+        .single();
 
-    if (error) throw error;
+      if (error) throw error;
 
-    return {
-      ...data,
-      createdAt: new Date(data.created_at).getTime(),
-      updatedAt: new Date(data.updated_at).getTime(),
-      files: data.files
-    };
+      return {
+        ...data,
+        createdAt: new Date(data.created_at).getTime(),
+        updatedAt: new Date(data.updated_at).getTime(),
+        files: data.files
+      };
+    } catch (error: any) {
+      console.error("Error creating project:", error);
+      throw new Error(error.message || "Failed to create the project.");
+    }
   },
 
   async renameProject(projectId: string, newName: string) {
-    const { error } = await supabase
-      .from('projects')
-      .update({ name: newName, updated_at: new Date().toISOString() })
-      .eq('id', projectId);
-
-    if (error) throw error;
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .update({ name: newName, updated_at: new Date().toISOString() })
+        .eq('id', projectId);
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Error renaming project:", error);
+      throw new Error(error.message || "Failed to rename project.");
+    }
   },
 
   async updateProject(projectId: string, updates: Partial<Project>) {
-    const payload: any = {
-      updated_at: new Date().toISOString()
-    };
-    if (updates.name) payload.name = updates.name;
-    if (updates.files) payload.files = updates.files;
+    try {
+      const payload: any = { updated_at: new Date().toISOString() };
+      if (updates.name) payload.name = updates.name;
+      if (updates.files) payload.files = updates.files;
 
-    const { error } = await supabase
-      .from('projects')
-      .update(payload)
-      .eq('id', projectId);
-
-    if (error) throw error;
+      const { error } = await supabase
+        .from('projects')
+        .update(payload)
+        .eq('id', projectId);
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Error updating project:", error);
+      throw new Error(error.message || "Failed to save project changes.");
+    }
   },
 
   async deleteProject(projectId: string) {
-    const { error } = await supabase
-      .from('projects')
-      .delete()
-      .eq('id', projectId);
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .delete()
+        .eq('id', projectId);
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Error deleting project:", error);
+      throw new Error(error.message || "Failed to delete project.");
+    }
+  },
 
-    if (error) throw error;
-  }
+  // --- Chat Sessions & Messages ---
+  async getChatSessions(projectId: string): Promise<ChatSession[]> {
+    try {
+      const { data, error } = await supabase
+        .from('chat_sessions')
+        .select('*, chat_messages(*)')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data.map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        createdAt: new Date(s.created_at).getTime(),
+        messages: (s.chat_messages || [])
+          .map((m: any) => ({ 
+            id: m.id,
+            clientId: m.client_id,
+            session_id: m.session_id,
+            role: m.role,
+            content: m.content,
+            timestamp: new Date(m.created_at).getTime(),
+            model: m.model,
+            attachments: m.attachments,
+            sources: m.sources,
+            completedFiles: m.completed_files,
+            isError: m.is_error,
+          }))
+          .sort((a: ChatMessage, b: ChatMessage) => a.timestamp - b.timestamp),
+      }));
+    } catch (error: any) {
+      console.error('Error fetching chat sessions:', error);
+      throw new Error(`Could not load chat sessions: ${error.message}`);
+    }
+  },
+
+  async createChatSession(projectId: string, name: string): Promise<ChatSession> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      const { data, error } = await supabase
+        .from('chat_sessions')
+        .insert({ project_id: projectId, user_id: user.id, name })
+        .select()
+        .single();
+      
+      if (error) throw error;
+
+      return {
+        ...data,
+        createdAt: new Date(data.created_at).getTime(),
+        messages: []
+      };
+    } catch (error: any) {
+      // FIX: Prevent circular structure errors by only throwing the message string.
+      const message = (error as Error).message || 'Failed to create chat session.';
+      console.error('Error creating chat session:', message);
+      throw new Error(message);
+    }
+  },
+
+  async saveChatMessage(message: ChatMessage): Promise<ChatMessage> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated to save message.');
+
+      // Build a payload with only the columns that exist in the DB.
+      // This prevents sending client-only fields like 'timestamp' and ensures RLS policy is met.
+      const payload = {
+        user_id: user.id,
+        client_id: message.clientId,
+        session_id: message.session_id,
+        role: message.role,
+        content: message.content,
+        model: message.model,
+        attachments: message.attachments,
+        sources: message.sources,
+        completed_files: message.completedFiles,
+        is_error: message.isError,
+      };
+      
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .upsert(payload, { onConflict: 'client_id' })
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      // Return a full ChatMessage object, mapping DB fields to client fields
+      return {
+          ...message, // a little inefficient but ensures all client fields are preserved
+          id: data.id,
+          clientId: data.client_id,
+          session_id: data.session_id,
+          role: data.role,
+          content: data.content,
+          model: data.model,
+          attachments: data.attachments,
+          sources: data.sources,
+          completedFiles: data.completed_files,
+          isError: data.is_error,
+          timestamp: new Date(data.created_at).getTime(),
+      };
+    } catch (error: any) {
+      // FIX: Prevent circular structure errors by only throwing the message string.
+      const message = (error as Error).message || 'Failed to save chat message.';
+      console.error('Error saving chat message:', message);
+       if (message.toLowerCase().includes("column")) {
+          throw new Error("Database schema mismatch. Please ensure your 'chat_messages' table matches the provided schema and re-run the app.");
+      }
+      throw new Error(message);
+    }
+  },
+  
+  async deleteChatMessage(messageId: string) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+      
+      const { error } = await supabase.from('chat_messages').delete().eq('id', messageId);
+      if (error) throw error;
+    } catch (error: any) {
+      const message = (error as Error).message || 'Failed to delete message.';
+      console.error('Error deleting chat message:', message);
+      throw new Error(message);
+    }
+  },
+
+  async deleteChatSession(sessionId: string) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      const { error } = await supabase.from('chat_sessions').delete().eq('id', sessionId);
+      if (error) throw error;
+    } catch (error: any) {
+       const message = (error as Error).message || 'Failed to delete chat session.';
+      console.error('Error deleting chat session:', message);
+      throw new Error(message);
+    }
+  },
+
+  // --- Checkpoints ---
+  async getCheckpointsForProject(projectId: string): Promise<Checkpoint[]> {
+    try {
+      const { data, error } = await supabase
+        .from('checkpoints')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data.map((c: any) => ({
+        ...c,
+        createdAt: new Date(c.created_at).getTime(),
+      }));
+    } catch (error: any) {
+       const message = (error as Error).message || 'Could not load project checkpoints.';
+      console.error('Error fetching checkpoints:', message);
+      throw new Error(message);
+    }
+  },
+
+  async createCheckpoint(projectId: string, name: string, files: Record<string, File>): Promise<Checkpoint> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      const { data, error } = await supabase
+        .from('checkpoints')
+        .insert({ project_id: projectId, user_id: user.id, name, files })
+        .select()
+        .single();
+      
+      if (error) throw error;
+
+      return {
+        ...data,
+        createdAt: new Date(data.created_at).getTime(),
+        files: data.files,
+      };
+    } catch (error: any) {
+       const message = (error as Error).message || 'Failed to create checkpoint.';
+      console.error('Error creating checkpoint:', message);
+      throw new Error(message);
+    }
+  },
+
+  async deleteCheckpoint(checkpointId: string) {
+    try {
+      const { error } = await supabase
+        .from('checkpoints')
+        .delete()
+        .eq('id', checkpointId);
+      if (error) throw error;
+    } catch (error: any) {
+      const message = (error as Error).message || 'Failed to delete checkpoint.';
+      console.error('Error deleting checkpoint:', message);
+      throw new Error(message);
+    }
+  },
 };

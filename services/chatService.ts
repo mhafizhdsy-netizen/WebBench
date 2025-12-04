@@ -2,7 +2,10 @@ import { ChatMessage } from '../types';
 
 const CHAT_HISTORY_PREFIX = 'webbench_chat_history_';
 
+// FIX: Added missing clientId and session_id to satisfy ChatMessage type.
 const getInitialMessage = (): ChatMessage => ({
+  clientId: 'initial-client-id-0',
+  session_id: 'initial-session-id-0',
   id: '1',
   role: 'assistant',
   content: 'Hello! I\'m your WebBench AI assistant. Ask me to create features, fix bugs, or style your page.',

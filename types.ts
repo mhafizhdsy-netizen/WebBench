@@ -23,21 +23,39 @@ export interface Project {
   lastOpenedFile?: string;
 }
 
+export interface ChatSession {
+  id: string; // DB UUID
+  name: string;
+  createdAt: number;
+  messages: ChatMessage[];
+}
+
+export interface Checkpoint {
+  id: string; // DB UUID
+  name: string;
+  createdAt: number;
+  files: Record<string, File>;
+}
+
 export interface ChatMessage {
-  id: string;
+  clientId: string; // Client-side unique ID for optimistic updates
+  id?: string; // DB UUID, available after save
+  session_id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
   isLoading?: boolean;
+  isError?: boolean;
   attachments?: { name: string; type: string; dataUrl: string }[];
-  isDeepThink?: boolean;
+  model?: string;
   completedFiles?: string[];
   isApplyingChanges?: boolean;
   liveStream?: {
     currentFile: string;
     currentCode: string;
     language: string;
-  }
+  };
+  sources?: { uri: string; title: string }[];
 }
 
 export interface EditorConfig {

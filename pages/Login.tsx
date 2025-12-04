@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../services/supabaseClient';
+import { projectService } from '../services/projectService';
 import { Button } from '../components/ui/Button';
 import { WebBenchLoader } from '../components/ui/Loader';
 import { SEO } from '../components/ui/SEO';
@@ -32,24 +32,16 @@ const Login: React.FC = () => {
 
     try {
       if (mode === 'signup') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        if (error) throw error;
-        setSuccessMessage("Account created successfully! Please check your email to verify your account.");
+        await projectService.signUp(email, password);
+        setSuccessMessage("Account created! Please check your email to verify your account.");
         setMode('login');
         setPassword('');
       } else { // mode === 'login'
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
+        await projectService.signInWithPassword(email, password);
         navigate('/dashboard');
       }
     } catch (err: any) {
-      setError(err.message || "An error occurred during authentication.");
+      setError(err.message || "An unknown error occurred.");
     } finally {
       setLoading(false);
     }
@@ -62,10 +54,7 @@ const Login: React.FC = () => {
     setSuccessMessage(null);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/`,
-      });
-      if (error) throw error;
+      await projectService.resetPasswordForEmail(email);
       setSuccessMessage("Password reset link sent! Please check your email inbox.");
     } catch (err: any) {
       setError(err.message || "Failed to send reset link.");
@@ -76,13 +65,7 @@ const Login: React.FC = () => {
   
   const handleGithubLogin = async () => {
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'github',
-        options: {
-          redirectTo: `${window.location.origin}/#/dashboard`,
-        },
-      });
-      if (error) throw error;
+      await projectService.signInWithOAuth('github');
     } catch (err: any) {
       setError(err.message || "Failed to login with GitHub.");
     }

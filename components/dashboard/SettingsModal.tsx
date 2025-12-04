@@ -17,7 +17,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="w-full max-w-lg md:max-w-2xl bg-sidebar border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-md md:max-w-xl bg-sidebar border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
         
         {/* Header */}
         <div className="flex items-center justify-between p-4 md:p-5 border-b border-border">

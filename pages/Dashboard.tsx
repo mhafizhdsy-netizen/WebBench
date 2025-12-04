@@ -8,7 +8,7 @@ import { ActionModal, ActionModalConfig } from '../components/dashboard/ActionMo
 import { SettingsModal } from '../components/dashboard/SettingsModal';
 import { WebBenchLoader } from '../components/ui/Loader';
 import { SEO } from '../components/ui/SEO';
-import { Plus, FolderOpen, LogOut, Search, Clock, Trash2, Upload, Code2, Settings, LayoutTemplate, Box, GitBranch, Database, Cpu, Layers, MoreVertical, Edit, Copy } from 'lucide-react';
+import { Plus, FolderOpen, LogOut, Search, Clock, Trash2, Upload, Code2, Settings, LayoutTemplate, Box, GitBranch, Database, Cpu, Layers, MoreVertical, Edit, Copy, AlertCircle, X } from 'lucide-react';
 import JSZip from 'jszip';
 
 // New Logo Component
@@ -37,6 +37,7 @@ const Dashboard: React.FC = () => {
   const [search, setSearch] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [modalConfig, setModalConfig] = useState<ActionModalConfig | null>(null);
@@ -48,10 +49,12 @@ const Dashboard: React.FC = () => {
 
   const fetchProjects = async () => {
     try {
+      setError(null);
       const data = await projectService.getProjects();
       setProjects(data);
-    } catch (error) {
-      console.error("Failed to fetch projects", error);
+    } catch (err: any) {
+      console.error("Failed to fetch projects", err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -73,13 +76,13 @@ const Dashboard: React.FC = () => {
 
   const handleCreateProject = async (name: string, template: 'blank' | 'starter') => {
     try {
-      // Pass an empty object for a blank project, otherwise let the service use the default
+      setError(null);
       const files = template === 'blank' ? {} : undefined;
       const newProject = await projectService.createProject(name, files);
       navigate(`/editor/${newProject.id}`);
-    } catch (error) {
-      alert("Failed to create project");
-      console.error(error);
+    } catch (err: any) {
+      setError(err.message);
+      console.error(err);
     }
   };
 
@@ -94,6 +97,7 @@ const Dashboard: React.FC = () => {
     if (!file) return;
 
     setIsImporting(true);
+    setError(null);
     try {
       const zip = await JSZip.loadAsync(file);
       const importedFiles: Record<string, File> = {};
@@ -129,9 +133,9 @@ const Dashboard: React.FC = () => {
       const newProject = await projectService.createProject(projectName, importedFiles);
       navigate(`/editor/${newProject.id}`);
 
-    } catch (error) {
-      console.error("Import failed", error);
-      alert("Failed to import project. Please ensure it is a valid zip file.");
+    } catch (err: any) {
+      console.error("Import failed", err);
+      setError(err.message || "Failed to import project. Please ensure it is a valid zip file.");
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -140,6 +144,7 @@ const Dashboard: React.FC = () => {
 
   const handleConfirmAction = async (config: ActionModalConfig, value?: string) => {
     try {
+      setError(null);
       switch (config.type) {
         case 'rename':
           if (value && value !== config.project.name) {
@@ -158,15 +163,19 @@ const Dashboard: React.FC = () => {
           setProjects(projects.filter(p => p.id !== config.project.id));
           break;
       }
-    } catch (error) {
-        alert(`Failed to ${config.type} project.`);
-        console.error(error);
+    } catch (err: any) {
+        setError(err.message || `Failed to ${config.type} project.`);
+        console.error(err);
     }
   };
 
   const handleLogout = async () => {
-    await projectService.signOut();
-    navigate('/login');
+    try {
+      await projectService.signOut();
+      navigate('/login');
+    } catch (err: any) {
+      setError(err.message);
+    }
   };
 
   const filteredProjects = projects.filter(p => 
@@ -252,14 +261,24 @@ const Dashboard: React.FC = () => {
 
         {/* Main Content */}
         <main className="p-4 lg:p-8 max-w-7xl mx-auto">
+          {error && (
+            <div className="p-4 mb-6 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3 text-red-400 text-sm animate-fade-in">
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+              <span>{error}</span>
+              <button onClick={() => setError(null)} className="ml-auto p-1 rounded-full hover:bg-white/10">
+                <X className="w-4 h-4"/>
+              </button>
+            </div>
+          )}
+          
           <div className="flex items-center justify-between mb-8">
             <h2 className="text-2xl font-bold text-white">Your Projects</h2>
             <div className="flex gap-3">
-              <Button onClick={handleImportClick} variant="secondary" className="gap-2" disabled={isImporting}>
+              <Button onClick={handleImportClick} variant="secondary" className="gap-2 h-8 px-3 text-xs" disabled={isImporting}>
                 <Upload className="w-4 h-4" />
                 {isImporting ? 'Importing...' : 'Import'}
               </Button>
-              <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2 shadow-lg shadow-accent/20 hover:shadow-accent/40 transition-all">
+              <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2 shadow-lg shadow-accent/20 hover:shadow-accent/40 transition-all h-8 px-3 text-xs">
                 <Plus className="w-4 h-4" />
                 New Project
               </Button>
@@ -270,7 +289,7 @@ const Dashboard: React.FC = () => {
             <div className="h-64 flex flex-col items-center justify-center">
               <WebBenchLoader size="lg" text="Loading Projects..." />
             </div>
-          ) : projects.length === 0 ? (
+          ) : projects.length === 0 && !error ? (
             <div className="flex flex-col items-center justify-center py-20 border border-dashed border-border rounded-xl bg-sidebar/30">
               <div className="w-20 h-20 bg-active rounded-full flex items-center justify-center mb-6 animate-pulse">
                 <FolderOpen className="w-10 h-10 text-gray-500" />
