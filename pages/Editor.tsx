@@ -315,6 +315,28 @@ const Editor: React.FC = () => {
     const signal = abortControllerRef.current.signal;
 
     try {
+      // --- Client-side Analysis Simulation ---
+      const filesToAnalyze = Object.keys(project.files).filter(p => project.files[p].name !== '.keep');
+      for (const filePath of filesToAnalyze) {
+          if (signal.aborted) throw new Error("Cancelled by user.");
+          
+          const analysisUpdate: Partial<ChatMessage> = {
+              isLoading: true,
+              analysisText: `Analyze: ${filePath}`,
+          };
+          updateMessageInState(aiMsg.session_id, { ...aiMsg, ...analysisUpdate });
+
+          await new Promise(resolve => setTimeout(resolve, 150));
+      }
+      
+      // --- Transition to Thinking State ---
+      const thinkingUpdate: Partial<ChatMessage> = {
+          isLoading: true,
+          analysisText: undefined, // Clear analysis text
+          content: '',
+      };
+      updateMessageInState(aiMsg.session_id, { ...aiMsg, ...thinkingUpdate });
+
       const streamResponse = await generateCodeStream( prompt, project.files, activeFile, attachments, model, signal );
       let fullText = '';
       let sources = new Map<string, string>();

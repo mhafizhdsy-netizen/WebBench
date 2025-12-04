@@ -159,6 +159,8 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, path: string, isFolder: boolean } | null>(null);
   const [modalConfig, setModalConfig] = useState<ModalConfig | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [draggedPath, setDraggedPath] = useState<string | null>(null);
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   
   useEffect(() => {
     if (activeFile && !searchQuery) {
@@ -338,6 +340,51 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
     }
   }, [searchQuery, filteredTree]);
 
+  // --- Drag and Drop Handlers ---
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, path: string) => {
+    e.dataTransfer.setData('application/json', JSON.stringify({ path }));
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => setDraggedPath(path), 0);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedPath(null);
+    setDragOverPath(null);
+  };
+  
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>, path: string) => {
+    e.preventDefault();
+    if (draggedPath && draggedPath !== path && !path.startsWith(draggedPath + '/')) {
+      setDragOverPath(path);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    const relatedTarget = e.relatedTarget as HTMLElement;
+    if (!e.currentTarget.contains(relatedTarget)) {
+      setDragOverPath(null);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetFolderPath: string) => {
+    e.preventDefault();
+    if (!draggedPath) return;
+
+    const sourceName = draggedPath.split('/').pop();
+    if (!sourceName) return;
+    
+    const newPath = targetFolderPath === '/' ? `/${sourceName}` : `${targetFolderPath}/${sourceName}`;
+    
+    if (newPath !== draggedPath && !newPath.startsWith(draggedPath + '/')) {
+      onRename(draggedPath, newPath);
+    }
+    handleDragEnd();
+  };
+
   const renderTree = (node: any, depth = 0) => {
     const entries = Object.values(node.children).sort((a: any, b: any) => {
       if (a.isFolder && !b.isFolder) return -1;
@@ -345,16 +392,20 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
       return a.name.localeCompare(b.name);
     });
 
-    // Mobile-first indentation: smaller default, scales up for larger screens
     const indent = (depth * 10 + 8) + (isMobile ? 0 : depth * 6 + 4); 
 
     return entries.map((item: any) => {
       const isHighlighted = highlightedFiles.has(item.path);
+      const isDragged = draggedPath === item.path;
+
       if (item.isFile) {
         return (
           <div 
             key={item.path}
-            className={`flex items-center gap-2 py-1 cursor-pointer text-xs md:text-sm border-l-2 transition-colors duration-100 ${activeFile === item.path ? 'bg-[#37373d] text-white border-accent' : 'text-gray-400 hover:bg-[#2a2d2e] hover:text-gray-200 border-transparent'} ${isHighlighted ? 'highlight-ai-change' : ''}`}
+            draggable="true"
+            onDragStart={(e) => handleDragStart(e, item.path)}
+            onDragEnd={handleDragEnd}
+            className={`flex items-center gap-2 py-1 cursor-pointer text-xs md:text-sm border-l-2 transition-all duration-100 ${activeFile === item.path ? 'bg-[#37373d] text-white border-accent' : 'text-gray-400 hover:bg-[#2a2d2e] hover:text-gray-200 border-transparent'} ${isHighlighted ? 'highlight-ai-change' : ''} ${isDragged ? 'opacity-40' : ''}`}
             style={{ paddingLeft: `${indent}px` }}
             onClick={() => onFileSelect(item.path)}
             onContextMenu={(e) => openContextMenu(e, item.path, false)}
@@ -365,10 +416,18 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
         );
       } 
       const isExpanded = !!expandedFolders[item.path];
+      const isDragOver = dragOverPath === item.path;
       return (
         <div key={item.path}>
           <div 
-            className={`flex items-center gap-1.5 py-1 cursor-pointer text-xs md:text-sm font-medium text-gray-300 hover:bg-[#2a2d2e] transition-colors duration-100 ${isHighlighted ? 'highlight-ai-change' : ''}`}
+            draggable="true"
+            onDragStart={(e) => handleDragStart(e, item.path)}
+            onDragEnd={handleDragEnd}
+            onDragOver={handleDragOver}
+            onDragEnter={(e) => handleDragEnter(e, item.path)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, item.path)}
+            className={`flex items-center gap-1.5 py-1 cursor-pointer text-xs md:text-sm font-medium text-gray-300 hover:bg-[#2a2d2e] transition-colors duration-100 rounded-sm ${isHighlighted ? 'highlight-ai-change' : ''} ${isDragged ? 'opacity-40' : ''} ${isDragOver ? 'bg-accent/20 ring-1 ring-accent' : ''}`}
             style={{ paddingLeft: `${indent - 4}px` }} // Adjust for chevron icon
             onClick={() => setExpandedFolders(p => ({...p, [item.path]: !p[item.path]}))}
             onContextMenu={(e) => openContextMenu(e, item.path, true)}
@@ -438,6 +497,9 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
       <div 
         className="flex-1 overflow-y-auto custom-scrollbar"
         onContextMenu={(e) => openContextMenu(e, '/', true)}
+        onDragOver={handleDragOver}
+        onDragEnter={(e) => handleDragEnter(e, '/')}
+        onDrop={(e) => handleDrop(e, '/')}
       >
         {searchQuery && Object.keys(filteredTree.children).length === 0 ? (
           <div className="p-4 text-center text-xs text-gray-500">No files found.</div>

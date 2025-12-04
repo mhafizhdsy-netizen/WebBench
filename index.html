@@ -149,6 +149,14 @@
       .highlight-ai-change {
         animation: pulse-bg 1.5s ease-out 2;
       }
+      /* Custom class to hide scrollbars but keep functionality */
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;  /* IE and Edge */
+        scrollbar-width: none;  /* Firefox */
+      }
     </style>
   <script type="importmap">
 {

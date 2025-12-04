@@ -46,6 +46,7 @@ export interface ChatMessage {
   timestamp: number;
   isLoading?: boolean;
   isError?: boolean;
+  analysisText?: string;
   attachments?: { name: string; type: string; dataUrl: string }[];
   model?: string;
   completedFiles?: string[];

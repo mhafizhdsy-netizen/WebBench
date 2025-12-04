@@ -31,7 +31,7 @@ const CodeBlock = React.memo(({ className, children, msg }: any) => {
   const isFileApplied = path && msg?.completedFiles?.includes(path);
 
   return (
-    <div className="my-2 border border-border bg-background rounded-lg overflow-auto">
+    <div className="my-2 border border-border bg-background rounded-lg overflow-auto no-scrollbar">
        {path && (
           <div className="px-3 py-1.5 bg-active border-b border-border text-[9px] md:text-[10px] text-gray-400 font-mono flex items-center justify-between">
               <span>{path}</span>
@@ -76,7 +76,7 @@ const LiveCodeRenderer = ({ stream }: { stream: ChatMessage['liveStream'] }) => 
         <span>Generating: {stream.currentFile}</span>
       </div>
       <div className="relative flex-1 min-h-0">
-        <div ref={scrollContainerRef} className="h-full overflow-auto custom-scrollbar">
+        <div ref={scrollContainerRef} className="h-full overflow-auto no-scrollbar">
           <pre className="!bg-transparent !my-0 !p-3 !font-mono">
             <code ref={codeRef} className={`language-${stream.language} !text-xs md:!text-sm`} style={{ textShadow: 'none' }}>
               {stream.currentCode || ' '}
@@ -112,6 +112,171 @@ const MODEL_CONFIG: Record<ModelName, { name: string; description: string; icon:
     'gemini-2.5-flash': { name: 'Balanced', description: 'Good balance of speed and capability.', icon: Cpu },
     'gemini-3-pro-preview': { name: 'Advanced', description: 'Slower, but best for complex requests.', icon: Cpu }
 };
+
+interface ChatMessageItemProps {
+  message: ChatMessage;
+  onContextMenu: (e: React.MouseEvent, message: ChatMessage) => void;
+  onCancel: () => void;
+}
+
+const ChatMessageItem = React.memo<ChatMessageItemProps>(({ message: msg, onContextMenu, onCancel }) => {
+  if (msg.role === 'system') {
+    return (
+      <div className="flex justify-center items-center my-2 md:my-3 animate-fade-in gap-3 md:gap-4">
+        <div className="h-px flex-1 bg-border"></div>
+        <span className="text-xs text-gray-400 bg-active px-2.5 py-1.5 rounded-full whitespace-nowrap flex items-center">
+          {msg.content.includes('✅') && <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 inline mr-1.5 md:mr-2 text-green-400" />}
+          {msg.content.includes('⏪') && <History className="w-3 h-3 md:w-3.5 md:h-3.5 inline mr-1.5 md:mr-2 text-cyan-400" />}
+          {msg.content}
+        </span>
+        <div className="h-px flex-1 bg-border"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div onContextMenu={(e) => onContextMenu(e, msg)} className={`flex flex-col w-full animate-fade-in group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+      <div className={`flex w-full max-w-[95%] md:max-w-[90%] min-w-0 items-end gap-1.5 md:gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+        <div className={`w-6 h-6 md:w-8 md:h-8 rounded-lg flex items-center justify-center shrink-0 border shadow-sm self-start ${msg.role === 'assistant' ? 'bg-gradient-to-br from-[#2d2d2d] to-[#1e1e1e] border-[#3e3e3e]' : 'bg-accent/90 border-accent/50'}`}>
+          {msg.role === 'assistant' ? <Bot className="w-3 h-3 md:w-5 md:h-5 text-accent" /> : <UserIcon className="w-3 h-3 md:w-5 md:h-5 text-white" />}
+        </div>
+        <div className={`relative min-w-0 rounded-2xl p-2.5 md:p-4 text-sm leading-relaxed shadow-md ${msg.role === 'user' ? 'bg-accent text-white rounded-tr-sm' : 'bg-[#252526] border border-border text-gray-300 rounded-tl-sm'}`}>
+          {msg.isError ? (
+            <div className="flex items-start gap-2 md:gap-3 text-red-400">
+              <AlertTriangle className="w-4 h-4 md:w-5 md:h-5 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-red-300 text-sm">AI Assistant Error</p>
+                <p className="text-xs md:text-sm">{msg.content}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="markdown-content">
+              {msg.attachments && msg.attachments.length > 0 && (
+                <div className="mb-2 grid grid-cols-3 gap-2">
+                  {msg.attachments.map((att, index) => (
+                    <div key={index} className="rounded-lg overflow-hidden bg-blue-400/50">
+                      {att.type.startsWith('image/') ? (
+                        <img src={att.dataUrl} alt={att.name} className="w-full h-16 md:h-20 object-cover" />
+                      ) : (
+                        <div className="w-full h-16 md:h-20 flex flex-col items-center justify-center p-1 text-center text-white">
+                          <FileText className="w-5 h-5 md:w-6 md:h-6 mb-1" />
+                          <span className="text-[9px] md:text-[10px] leading-tight break-all">{att.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {msg.content && (
+                <ReactMarkdown components={{
+                    code: (props) => {
+                        const { inline, children } = props;
+                        if (inline) {
+                            return <code className="bg-background px-1 py-0.5 rounded-sm text-xs">{children}</code>
+                        }
+                        return <CodeBlock {...props} msg={msg}>{children}</CodeBlock>;
+                    },
+                    blockquote({children}) { return <div className="border-l-4 border-green-500 pl-3 py-1 my-2 bg-green-500/10 rounded-r text-green-200 font-mono text-xs">{children}</div>; },
+                    a({node, children, ...props}) { return <a className="text-accent hover:underline cursor-pointer" {...props}>{children}</a> }
+                }}>
+                  {msg.content}
+                </ReactMarkdown>
+              )}
+              {msg.isLoading && (
+                  <>
+                      {msg.analysisText ? (
+                          <div className="mt-2 text-gray-400 bg-black/20 px-2 py-1.5 rounded-md font-mono text-xs flex items-center gap-2 border border-border">
+                              <Loader2 className="w-3 h-3 md:w-3.5 md:h-3.5 animate-spin" />
+                              <span>{msg.analysisText}</span>
+                          </div>
+                      ) : msg.liveStream ? (
+                          <>
+                              <LiveCodeRenderer stream={msg.liveStream} />
+                              {msg.streamingCompletedFiles && msg.streamingCompletedFiles.length > 0 && (
+                                  <div className="mt-2 space-y-1">
+                                      {msg.streamingCompletedFiles.map(file => (
+                                      <div key={file} className="text-xs text-green-300 bg-green-900/40 px-2 py-1.5 rounded-md font-mono flex items-center gap-2 border border-green-500/20 animate-fade-in">
+                                          <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 text-green-400" /> Generated: {file}
+                                      </div>
+                                      ))}
+                                  </div>
+                              )}
+                          </>
+                      ) : msg.isApplyingChanges ? (
+                           <div className="mt-2 text-gray-400 bg-black/20 px-2 py-1.5 rounded-md font-mono text-xs flex items-center gap-2 border border-border">
+                              <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 text-green-400 animate-pulse" /> Applying changes...
+                          </div>
+                      ) : (
+                          <div className="mt-2 text-gray-400 bg-black/20 px-2 py-1.5 rounded-md font-mono text-xs flex items-center gap-2 border border-border animate-pulse">
+                              <Cpu className="w-3 h-3 md:w-3.5 md:h-3.5" /> Thinking...
+                          </div>
+                      )}
+                  </>
+              )}
+              {!msg.isLoading && msg.completedFiles && msg.completedFiles.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                      {msg.completedFiles.map(file => (
+                      <div key={file} className="text-xs text-green-300 bg-green-900/40 px-2 py-1.5 rounded-md font-mono flex items-center gap-2 border border-green-500/20">
+                          <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 text-green-400" /> Generated: {file}
+                      </div>
+                      ))}
+                  </div>
+              )}
+              {msg.sources && msg.sources.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <h4 className="text-xs font-semibold text-gray-400 mb-2 flex items-center gap-1.5 md:gap-2">
+                    <LinkIcon className="w-3 h-3 md:w-3.5 md:h-3.5" />
+                    Sources
+                  </h4>
+                  <div className="space-y-1.5">
+                    {msg.sources.map((source, i) => (
+                      <a 
+                        key={i} 
+                        href={source.uri} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="block text-xs text-accent/80 hover:text-accent hover:underline truncate"
+                      >
+                        {source.title || source.uri}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      {msg.role === 'assistant' && msg.isLoading && (
+        <div className="mt-2 ml-9 md:ml-10 flex items-center gap-2">
+          <button 
+              onClick={onCancel}
+              className="flex items-center gap-1.5 px-2 py-1 text-xs bg-error/80 hover:bg-error text-white rounded-lg border border-red-500/50 transition-all"
+          >
+              <Square className="w-2.5 h-2.5 md:w-3 md:h-3" />
+              Stop Generating
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}, (prevProps, nextProps) => {
+    // Custom comparison function for React.memo to prevent unnecessary re-renders
+    const prev = prevProps.message;
+    const next = nextProps.message;
+    return (
+        prev.clientId === next.clientId &&
+        prev.content === next.content &&
+        prev.isLoading === next.isLoading &&
+        prev.isError === next.isError &&
+        prev.isApplyingChanges === next.isApplyingChanges &&
+        prev.liveStream?.currentCode === next.liveStream?.currentCode &&
+        prev.liveStream?.currentFile === next.liveStream?.currentFile &&
+        (prev.streamingCompletedFiles || []).length === (next.streamingCompletedFiles || []).length &&
+        (prev.completedFiles || []).length === (next.completedFiles || []).length
+    );
+});
+
 
 interface AIChatProps {
   files: Record<string, File>;
@@ -225,12 +390,21 @@ export const AIChat: React.FC<AIChatProps> = ({
       isAutoScrollEnabled.current = true;
     }
   };
+  
+  useEffect(() => {
+    // Scroll to bottom when the chat becomes visible or the session changes.
+    // A small timeout ensures the DOM has rendered and scrollHeight is accurate.
+    setTimeout(() => {
+      scrollToBottom();
+    }, 50);
+  }, [activeSessionId]);
+
 
   useEffect(() => {
     if (isAutoScrollEnabled.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, messages[messages.length - 1]?.liveStream?.currentCode, messages[messages.length - 1]?.streamingCompletedFiles, activeSessionId]);
+  }, [messages, messages[messages.length - 1]?.liveStream?.currentCode, messages[messages.length - 1]?.streamingCompletedFiles]);
 
   useEffect(() => {
     if (inputRef.current) {
@@ -394,152 +568,16 @@ export const AIChat: React.FC<AIChatProps> = ({
       </div>
 
       <div className="flex-1 min-h-0 relative">
-        <div ref={scrollRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto custom-scrollbar flex flex-col">
+        <div ref={scrollRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto no-scrollbar flex flex-col">
           <div className="flex-grow p-3 md:p-4 space-y-3 md:space-y-4 bg-[#1a1a1a]">
-            {messages.map((msg, index) => {
-              if (msg.role === 'system') {
-                return (
-                  <div key={msg.clientId} className="flex justify-center items-center my-2 md:my-3 animate-fade-in gap-3 md:gap-4">
-                    <div className="h-px flex-1 bg-border"></div>
-                    <span className="text-xs text-gray-400 bg-active px-2.5 py-1.5 rounded-full whitespace-nowrap flex items-center">
-                      {msg.content.includes('✅') && <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 inline mr-1.5 md:mr-2 text-green-400" />}
-                      {msg.content.includes('⏪') && <History className="w-3 h-3 md:w-3.5 md:h-3.5 inline mr-1.5 md:mr-2 text-cyan-400" />}
-                      {msg.content}
-                    </span>
-                    <div className="h-px flex-1 bg-border"></div>
-                  </div>
-                );
-              }
-
-              return (
-                <div key={msg.clientId} onContextMenu={(e) => handleContextMenu(e, msg)} className={`flex flex-col w-full animate-fade-in group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                    <div className={`flex w-full max-w-[95%] md:max-w-[90%] min-w-0 items-end gap-1.5 md:gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                      
-                      <div className={`w-6 h-6 md:w-8 md:h-8 rounded-lg flex items-center justify-center shrink-0 border shadow-sm self-start ${msg.role === 'assistant' ? 'bg-gradient-to-br from-[#2d2d2d] to-[#1e1e1e] border-[#3e3e3e]' : 'bg-accent/90 border-accent/50'}`}>
-                        {msg.role === 'assistant' ? <Bot className="w-3 h-3 md:w-5 md:h-5 text-accent" /> : <UserIcon className="w-3 h-3 md:w-5 md:h-5 text-white" />}
-                      </div>
-
-                      <div className={`relative min-w-0 rounded-2xl p-2.5 md:p-4 text-sm leading-relaxed shadow-md ${msg.role === 'user' ? 'bg-accent text-white rounded-tr-sm' : 'bg-[#252526] border border-border text-gray-300 rounded-tl-sm'}`}>
-                        {msg.isError ? (
-                           <div className="flex items-start gap-2 md:gap-3 text-red-400">
-                             <AlertTriangle className="w-4 h-4 md:w-5 md:h-5 shrink-0 mt-0.5" />
-                             <div>
-                               <p className="font-semibold text-red-300 text-sm">AI Assistant Error</p>
-                               <p className="text-xs md:text-sm">{msg.content}</p>
-                             </div>
-                           </div>
-                        ) : (
-                          <div className="markdown-content">
-                            {msg.attachments && msg.attachments.length > 0 && (
-                              <div className="mb-2 grid grid-cols-3 gap-2">
-                                {msg.attachments.map((att, index) => (
-                                  <div key={index} className="rounded-lg overflow-hidden bg-blue-400/50">
-                                    {att.type.startsWith('image/') ? (
-                                      <img src={att.dataUrl} alt={att.name} className="w-full h-16 md:h-20 object-cover" />
-                                    ) : (
-                                      <div className="w-full h-16 md:h-20 flex flex-col items-center justify-center p-1 text-center text-white">
-                                        <FileText className="w-5 h-5 md:w-6 md:h-6 mb-1" />
-                                        <span className="text-[9px] md:text-[10px] leading-tight break-all">{att.name}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            
-                            {msg.content && (
-                              <ReactMarkdown components={{
-                                  code: (props) => {
-                                      const { inline, children } = props;
-                                      if (inline) {
-                                          return <code className="bg-background px-1 py-0.5 rounded-sm text-xs">{children}</code>
-                                      }
-                                      return <CodeBlock {...props} msg={msg}>{children}</CodeBlock>;
-                                  },
-                                  blockquote({children}) { return <div className="border-l-4 border-green-500 pl-3 py-1 my-2 bg-green-500/10 rounded-r text-green-200 font-mono text-xs">{children}</div>; },
-                                  a({node, children, ...props}) { return <a className="text-accent hover:underline cursor-pointer" {...props}>{children}</a> }
-                              }}>
-                                {msg.content}
-                              </ReactMarkdown>
-                            )}
-
-                            {msg.isLoading && (
-                                <>
-                                    {msg.liveStream ? (
-                                        <>
-                                            <LiveCodeRenderer stream={msg.liveStream} />
-                                            {msg.streamingCompletedFiles && msg.streamingCompletedFiles.length > 0 && (
-                                                <div className="mt-2 space-y-1">
-                                                    {msg.streamingCompletedFiles.map(file => (
-                                                    <div key={file} className="text-xs text-green-300 bg-green-900/40 px-2 py-1.5 rounded-md font-mono flex items-center gap-2 border border-green-500/20 animate-fade-in">
-                                                        <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 text-green-400" /> Generated: {file}
-                                                    </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </>
-                                    ) : msg.isApplyingChanges ? (
-                                         <div className="mt-2 text-gray-400 bg-black/20 px-2 py-1.5 rounded-md font-mono text-xs flex items-center gap-2 border border-border">
-                                            <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 text-green-400 animate-pulse" /> Applying changes...
-                                        </div>
-                                    ) : (
-                                        <div className="mt-2 text-gray-400 bg-black/20 px-2 py-1.5 rounded-md font-mono text-xs flex items-center gap-2 border border-border animate-pulse">
-                                            <Cpu className="w-3 h-3 md:w-3.5 md:h-3.5" /> Thinking...
-                                        </div>
-                                    )}
-                                </>
-                            )}
-                            
-                            {!msg.isLoading && msg.completedFiles && msg.completedFiles.length > 0 && (
-                                <div className="mt-2 space-y-1">
-                                    {msg.completedFiles.map(file => (
-                                    <div key={file} className="text-xs text-green-300 bg-green-900/40 px-2 py-1.5 rounded-md font-mono flex items-center gap-2 border border-green-500/20">
-                                        <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5 text-green-400" /> Generated: {file}
-                                    </div>
-                                    ))}
-                                </div>
-                            )}
-                            
-                            {msg.sources && msg.sources.length > 0 && (
-                              <div className="mt-3 pt-3 border-t border-border">
-                                <h4 className="text-xs font-semibold text-gray-400 mb-2 flex items-center gap-1.5 md:gap-2">
-                                  <LinkIcon className="w-3 h-3 md:w-3.5 md:h-3.5" />
-                                  Sources
-                                </h4>
-                                <div className="space-y-1.5">
-                                  {msg.sources.map((source, i) => (
-                                    <a 
-                                      key={i} 
-                                      href={source.uri} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      className="block text-xs text-accent/80 hover:text-accent hover:underline truncate"
-                                    >
-                                      {source.title || source.uri}
-                                    </a>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {msg.role === 'assistant' && index === messages.length - 1 && isLoading && (
-                      <div className="mt-2 ml-9 md:ml-10 flex items-center gap-2">
-                        <button 
-                            onClick={onCancel}
-                            className="flex items-center gap-1.5 px-2 py-1 text-xs bg-error/80 hover:bg-error text-white rounded-lg border border-red-500/50 transition-all"
-                        >
-                            <Square className="w-2.5 h-2.5 md:w-3 md:h-3" />
-                            Stop Generating
-                        </button>
-                      </div>
-                    )}
-                </div>
-              )
-            })}
+            {messages.map((msg) => (
+              <ChatMessageItem
+                key={msg.clientId}
+                message={msg}
+                onContextMenu={handleContextMenu}
+                onCancel={onCancel}
+              />
+            ))}
             <div className="h-4"></div>
           </div>
           <div className="bg-sidebar p-1 md:p-2 border-t border-border shadow-2xl relative shrink-0">
@@ -601,7 +639,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                     onChange={(e) => setInput(e.target.value)} 
                     onKeyDown={handleKeyDown} 
                     placeholder="Ask AI to build, fix, or explain..." 
-                    className="w-full bg-transparent border-none text-white text-sm px-1.5 py-2 md:px-2 md:py-3 outline-none resize-none max-h-[150px] min-h-[24px] custom-scrollbar placeholder:text-gray-600" 
+                    className="w-full bg-transparent border-none text-white text-sm px-1.5 py-2 md:px-2 md:py-3 outline-none resize-none max-h-[150px] min-h-[24px] no-scrollbar placeholder:text-gray-600" 
                     rows={1} 
                   />
               </div>
