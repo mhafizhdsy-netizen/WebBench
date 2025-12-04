@@ -59,15 +59,13 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger }) => {
   };
 
   useEffect(() => {
+    if (!iframeRef.current) return;
     setLoading(true);
-    // Use a slight delay to ensure the UI shows the loader even for fast operations
+    iframeRef.current.srcdoc = bundleProject();
+    // A short timeout to allow the iframe to start loading and prevent UI flickering
     const timeout = setTimeout(() => {
-      if (iframeRef.current) {
-        iframeRef.current.srcdoc = bundleProject();
-      }
-      // Artificial delay for smooth UX (prevents flickering)
-      setTimeout(() => setLoading(false), 300);
-    }, 100); 
+      setLoading(false);
+    }, 150);
     return () => clearTimeout(timeout);
   }, [files, refreshTrigger]);
 
