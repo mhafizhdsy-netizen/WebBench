@@ -2,7 +2,7 @@ export interface File {
   path: string;
   name: string;
   content: string;
-  type: 'html' | 'css' | 'javascript' | 'json' | 'markdown' | 'image' | 'folder';
+  type: 'html' | 'css' | 'javascript' | 'json' | 'markdown' | 'image' | 'folder' | 'plaintext';
   lastModified: number;
 }
 
@@ -49,6 +49,7 @@ export interface ChatMessage {
   attachments?: { name: string; type: string; dataUrl: string }[];
   model?: string;
   completedFiles?: string[];
+  streamingCompletedFiles?: string[];
   isApplyingChanges?: boolean;
   liveStream?: {
     currentFile: string;

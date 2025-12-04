@@ -6,7 +6,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Editor from './pages/Editor';
 import { Loader2 } from 'lucide-react';
-import ResetPassword from './components/auth/ResetPassword';
+import { ResetPassword } from './components/auth/ResetPassword';
 
 // Private Route Wrapper
 interface PrivateRouteProps {
@@ -39,7 +39,7 @@ const PrivateRoute: React.FC<PrivateRouteProps> = ({ children }) => {
   if (loading) {
     return (
       <div className="h-screen w-screen bg-background flex items-center justify-center text-accent">
-        <Loader2 className="animate-spin w-8 h-8" />
+        <Loader2 className="animate-spin w-7 h-7 md:w-8 md:h-8" />
       </div>
     );
   }
@@ -76,7 +76,7 @@ const App: React.FC = () => {
               <PrivateRoute>
                 <Dashboard />
               </PrivateRoute>
-            } 
+            }
           />
           <Route 
             path="/editor/:projectId" 
@@ -84,7 +84,7 @@ const App: React.FC = () => {
               <PrivateRoute>
                 <Editor />
               </PrivateRoute>
-            } 
+            }
           />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

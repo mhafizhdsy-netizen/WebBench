@@ -22,6 +22,11 @@ import { ActionModal } from '../components/dashboard/ActionModal';
 type SidebarView = 'files' | 'ai' | 'search';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
+// Regex to match a complete file code block including the path comment
+// This will be used to strip them from the final markdown content display
+const FILE_CODE_BLOCK_FULL_REGEX = /```[a-zA-Z]*\s*\n(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)[\s\S]*?```/g;
+
+
 const Editor: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -54,10 +59,11 @@ const Editor: React.FC = () => {
     const handleResize = () => {
       const newIsMobile = window.innerWidth < 768;
       setIsMobile(newIsMobile);
+      // Automatically close sidebar on mobile, keep open on desktop
       setIsSidebarOpen(!newIsMobile);
     };
     window.addEventListener('resize', handleResize);
-    handleResize();
+    handleResize(); // Initial check
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
@@ -199,36 +205,54 @@ const Editor: React.FC = () => {
     let updatedFiles = { ...project.files };
     const changedPaths: string[] = [];
     let newOpenFiles = [...openFiles];
-    
+
     filesToProcess.forEach((f: any) => {
-      const path = f.path.startsWith('/') ? f.path : '/' + f.path;
-      if (f.action === 'delete') {
-        Object.keys(updatedFiles).forEach(key => {
-          if (key === path || key.startsWith(path + '/')) {
-            delete updatedFiles[key];
-            if (activeFile === key) setActiveFile(null);
-            newOpenFiles = newOpenFiles.filter(op => op !== key);
-          }
-        });
-      } else {
-        updatedFiles[path] = {
-          path, name: path.split('/').pop()!,
-          type: f.type || 'plaintext', content: f.content || '',
-          lastModified: Date.now()
-        };
-        if (!newOpenFiles.includes(path) && newOpenFiles.length < 10) newOpenFiles.push(path);
-        if (!activeFile) setActiveFile(path);
-      }
-      changedPaths.push(path);
+        const path = f.path.startsWith('/') ? f.path : '/' + f.path;
+        changedPaths.push(path); // Always record the path being acted upon.
+
+        if (f.action === 'delete') {
+            Object.keys(updatedFiles).forEach(key => {
+                // Delete the file itself, or if it's a folder, delete everything inside it.
+                if (key === path || key.startsWith(path + '/')) {
+                    delete updatedFiles[key];
+                    if (activeFile === key) setActiveFile(null);
+                    newOpenFiles = newOpenFiles.filter(op => op !== key);
+                }
+            });
+        } else { // 'create' or 'update'
+            if (f.type === 'folder') {
+                const folderPath = path.endsWith('/') ? path.slice(0, -1) : path;
+                const keepFilePath = `${folderPath}/.keep`;
+                if (!updatedFiles[keepFilePath]) {
+                    updatedFiles[keepFilePath] = {
+                        path: keepFilePath, name: '.keep',
+                        type: 'plaintext', content: '',
+                        lastModified: Date.now()
+                    };
+                }
+            } else {
+                updatedFiles[path] = {
+                    path, name: path.split('/').pop()!,
+                    type: f.type || 'plaintext', content: f.content || '',
+                    lastModified: Date.now()
+                };
+                if (!newOpenFiles.includes(path) && newOpenFiles.length < 10) {
+                    newOpenFiles.push(path);
+                }
+                if (!activeFile) {
+                    setActiveFile(path);
+                }
+            }
+        }
     });
-    
+
     setHighlightedFiles(new Set(changedPaths));
     setTimeout(() => setHighlightedFiles(new Set()), 4000);
 
     setProject({ ...project, files: updatedFiles });
     setOpenFiles(newOpenFiles);
     if (activeFile && !updatedFiles[activeFile]) {
-      setActiveFile(newOpenFiles.length > 0 ? newOpenFiles[0] : null);
+        setActiveFile(newOpenFiles.length > 0 ? newOpenFiles[newOpenFiles.length - 1] : null);
     }
     setRefreshTrigger(p => p + 1);
     return Promise.resolve(changedPaths);
@@ -261,7 +285,6 @@ const Editor: React.FC = () => {
     try {
       const streamResponse = await generateCodeStream( prompt, project.files, activeFile, attachments, model, signal );
       let fullText = '';
-      const completedFileBlocksRegex = /```(\w+)\s*\n(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)[\s\S]*?\n```/g;
       let sources = new Map<string, string>();
       
       for await (const chunk of streamResponse) {
@@ -278,76 +301,105 @@ const Editor: React.FC = () => {
           }
         }
         
-        const jsonBlockStarted = fullText.includes('```json');
-        const conversationalPart = jsonBlockStarted ? fullText.substring(0, fullText.indexOf('```json')) : fullText;
-        const completedFiles = [...conversationalPart.matchAll(completedFileBlocksRegex)].map(match => match[2]);
-        let liveStreamData: ChatMessage['liveStream'] | undefined = undefined;
-        let contentForMarkdown = conversationalPart;
-        const lastOpeningFenceMatch = [...conversationalPart.matchAll(/```(\w*)\s*\n/g)].pop();
+        // Find all completed code blocks from the full stream text
+        const completedBlocks = [...fullText.matchAll(FILE_CODE_BLOCK_FULL_REGEX)];
+        const completedFilesInStream = completedBlocks.map(match => match[1]);
 
+        // Temporarily remove completed blocks to find the live one
+        let textForLiveParsing = fullText;
+        completedBlocks.forEach(match => {
+            textForLiveParsing = textForLiveParsing.replace(match[0], '');
+        });
+
+        let currentLiveStreamData: ChatMessage['liveStream'] | undefined = undefined;
+        let contentForMarkdown = textForLiveParsing; // This now only contains summary + live block + json block
+
+        const lastOpeningFenceMatch = [...textForLiveParsing.matchAll(/```(\w*)\s*\n/g)].pop();
         if (lastOpeningFenceMatch) {
             const lastOpeningFenceIndex = lastOpeningFenceMatch.index!;
-            const contentAfterLastOpen = conversationalPart.substring(lastOpeningFenceIndex);
+            const contentAfterLastOpen = textForLiveParsing.substring(lastOpeningFenceIndex);
+            
             if (!contentAfterLastOpen.substring(lastOpeningFenceMatch[0].length).includes('```')) {
                 const language = lastOpeningFenceMatch[1] || 'plaintext';
                 const codeContent = contentAfterLastOpen.substring(lastOpeningFenceMatch[0].length);
                 const pathMatch = codeContent.match(/^(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)/);
+                
+                // Ensure it's a file block and not the final json block
                 if (pathMatch && language.toLowerCase() !== 'json') {
-                    liveStreamData = {
+                    currentLiveStreamData = {
                         currentFile: pathMatch[1],
                         language: language,
                         currentCode: codeContent.replace(/^(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)\s*(\*\/)?\n?/, ''),
                     };
-                    contentForMarkdown = conversationalPart.substring(0, lastOpeningFenceIndex);
+                    // FIX: Remove the live block from markdown content to prevent duplication
+                    contentForMarkdown = textForLiveParsing.substring(0, lastOpeningFenceIndex).trim();
                 }
             }
         }
-        
+
+        // Now, also remove the final JSON block from the markdown content
+        const finalJsonBlockRegex = /```json\s*[\s\S]*?```\s*$/;
+        contentForMarkdown = contentForMarkdown.replace(finalJsonBlockRegex, '').trim();
+
+        const jsonBlockDetected = fullText.includes('```json');
+
         const updatedMsg: Partial<ChatMessage> = { 
             content: contentForMarkdown,
-            liveStream: jsonBlockStarted ? undefined : liveStreamData,
-            completedFiles: completedFiles,
-            isApplyingChanges: jsonBlockStarted,
+            liveStream: currentLiveStreamData,
+            streamingCompletedFiles: completedFilesInStream,
+            isApplyingChanges: jsonBlockDetected,
             isLoading: true,
-          };
+        };
         updateMessageInState(aiMsg.session_id, { ...aiMsg, ...updatedMsg });
       }
 
       const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/;
       const jsonMatch = fullText.match(jsonBlockRegex);
-      const finalContent = fullText.replace(jsonBlockRegex, '').trim();
-      const finalSources = Array.from(sources, ([uri, title]) => ({ uri, title }));
+      
+      let finalContentForMessage = fullText.replace(FILE_CODE_BLOCK_FULL_REGEX, '').replace(jsonBlockRegex, '').trim();
 
-      const finalAiMessageUpdate = async (update: Partial<ChatMessage>) => {
-        let finalMessage = { ...aiMsg, isLoading: false, liveStream: undefined, isApplyingChanges: false, sources: finalSources, ...update };
-        const savedMessage = await projectService.saveChatMessage(finalMessage);
-        updateMessageInState(aiMsg.session_id, { ...finalMessage, ...savedMessage });
-      };
+      let completedPaths: string[] = [];
+      let isError = false;
+      let errorContent = '';
       
       if (jsonMatch && jsonMatch[1]) {
         try {
-          const response = JSON.parse(jsonMatch[1]);
+          // Sanitize the JSON string before parsing to remove trailing commas etc.
+          const sanitizedJson = jsonMatch[1].trim().replace(/,(?=\s*?[\}\]])/g, '');
+          const response = JSON.parse(sanitizedJson);
           if (response.files && Array.isArray(response.files) && response.files.length > 0) {
-            const changedPaths = await handleAIChanges(response.files);
-            const successMsg = `\n\n✨ **Changes Applied Successfully!**`;
-            await finalAiMessageUpdate({ content: finalContent + successMsg, completedFiles: changedPaths });
-          } else {
-            const generatedFiles = [...finalContent.matchAll(completedFileBlocksRegex)].map(match => match[2]);
-            await finalAiMessageUpdate({ content: finalContent, completedFiles: generatedFiles });
+            completedPaths = await handleAIChanges(response.files);
           }
         } catch (e: any) {
           console.error("Failed to parse AI JSON response", e, "Raw JSON:", jsonMatch[1]);
-          const errorContent = `Sorry, I couldn't process the file changes due to a formatting error in my response. Here's my explanation:\n\n${finalContent}\n\n\`\`\`json\n${jsonMatch[1]}\n\`\`\``;
-          await finalAiMessageUpdate({ content: errorContent, isError: true });
+          isError = true;
+          errorContent = `Sorry, I couldn't process the file changes due to a formatting error in my response. Here's my explanation:\n\n${fullText.replace(jsonBlockRegex, '')}\n\n**Faulty JSON block:**\n\`\`\`json\n${jsonMatch[1]}\n\`\`\``;
         }
       } else {
-        const generatedFiles = [...finalContent.matchAll(completedFileBlocksRegex)].map(match => match[2]);
-        await finalAiMessageUpdate({ content: finalContent, completedFiles: generatedFiles });
+        completedPaths = [...fullText.matchAll(FILE_CODE_BLOCK_FULL_REGEX)].map(match => match[1]);
       }
+      
+      const finalSources = Array.from(sources, ([uri, title]) => ({ uri, title }));
+      
+      const finalMessageUpdate: ChatMessage = { 
+          ...aiMsg, 
+          isLoading: false, 
+          liveStream: undefined,
+          streamingCompletedFiles: undefined,
+          isApplyingChanges: false, 
+          sources: finalSources, 
+          content: isError ? errorContent : finalContentForMessage,
+          completedFiles: isError ? [] : completedPaths,
+          isError: isError
+      };
+      
+      const savedMessage = await projectService.saveChatMessage(finalMessageUpdate);
+      updateMessageInState(aiMsg.session_id, { ...finalMessageUpdate, ...savedMessage });
+    
     } catch (error: any) {
       console.error("Chat error:", error);
       const errorContent = signal.aborted ? "Generation cancelled." : `Sorry, I encountered an error: ${error.message}`;
-      const finalMessage = { ...aiMsg, content: errorContent, isLoading: false, liveStream: undefined, isError: true };
+      const finalMessage = { ...aiMsg, content: errorContent, isLoading: false, liveStream: undefined, streamingCompletedFiles: undefined, isError: true };
       const savedMessage = await projectService.saveChatMessage(finalMessage);
       updateMessageInState(aiMsg.session_id, { ...finalMessage, ...savedMessage });
     } finally {
@@ -385,11 +437,12 @@ const Editor: React.FC = () => {
     const session = chatSessions.find(s => s.id === sessionId);
     if (!session) return;
 
-    const lastUserMessage = [...session.messages].reverse().find(m => m.role === 'user');
+    const lastUserMessageIndex = session.messages.map(m => m.role).lastIndexOf('user');
+    if (lastUserMessageIndex === -1) return;
+
+    const lastUserMessage = session.messages[lastUserMessageIndex];
     if (!lastUserMessage) return;
 
-    const lastUserMessageIndex = session.messages.findLastIndex(m => m.role === 'user');
-    
     const model = lastUserMessage.model || 'gemini-2.5-flash';
     const aiMsg: ChatMessage = { clientId: (Date.now() + 1).toString(), session_id: sessionId, role: 'assistant', content: '', timestamp: Date.now(), isLoading: true, model };
 
@@ -499,7 +552,7 @@ const Editor: React.FC = () => {
     } else {
       const name = path.split('/').pop() || 'new-file';
       const ext = name.split('.').pop();
-      let type: any = 'html';
+      let type: ProjectFile['type'] = 'html';
       if(ext === 'css') type = 'css'; else if(ext === 'js') type = 'javascript'; else if(ext === 'json') type = 'json';
       updatedFiles[path] = { path, name, content: '', type, lastModified: Date.now() };
       handleFileSelect(path);
@@ -564,25 +617,35 @@ const Editor: React.FC = () => {
     handleFileSelect(newPath);
   };
   
-  const renderSaveStatus = () => {
+  const getSaveStatusTitle = () => {
     switch(saveStatus) {
-      case 'saving': return <Loader2 className="w-4 h-4 animate-spin text-yellow-500" title="Saving..." />;
-      case 'saved': return <Check className="w-4 h-4 text-green-500" title="Saved successfully!" />;
-      case 'error': return <CloudOff className="w-4 h-4 text-red-500" title="Save failed!" />;
+      case 'saving': return "Saving...";
+      case 'saved': return "Saved successfully!";
+      case 'error': return "Save failed!";
       case 'idle':
-      default:
-        return <Cloud className="w-4 h-4 text-gray-500" title="Changes saved" />;
+      default: return "Changes saved";
     }
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-background text-white"><Loader2 className="animate-spin w-8 h-8"/></div>;
+  const renderSaveStatus = () => {
+    switch(saveStatus) {
+      case 'saving': return <Loader2 className="w-3.5 h-3.5 md:w-4 md:h-4 animate-spin text-yellow-500" />;
+      case 'saved': return <Check className="w-3.5 h-3.5 md:w-4 md:h-4 text-green-500" />;
+      case 'error': return <CloudOff className="w-3.5 h-3.5 md:w-4 md:h-4 text-red-500" />;
+      case 'idle':
+      default:
+        return <Cloud className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-500" />;
+    }
+  };
+
+  if (loading) return <div className="h-screen flex items-center justify-center bg-background text-white"><Loader2 className="animate-spin w-7 h-7 md:w-8 md:h-8"/></div>;
 
   if (loadError) return (
-    <div className="h-screen flex flex-col items-center justify-center bg-background text-red-400 p-4">
-      <AlertTriangle className="w-12 h-12 mb-4"/>
-      <h2 className="text-xl font-bold text-white">Failed to Load Project</h2>
-      <p className="text-gray-400 mt-2 text-center">{loadError}</p>
-      <Button onClick={() => navigate('/dashboard')} className="mt-6">
+    <div className="h-screen flex flex-col items-center justify-center bg-background text-red-400 p-4 md:p-6">
+      <AlertTriangle className="w-10 h-10 md:w-12 md:h-12 mb-3 md:mb-4"/>
+      <h2 className="text-xl md:text-2xl font-bold text-white">Failed to Load Project</h2>
+      <p className="text-sm md:text-base text-gray-400 mt-2 text-center">{loadError}</p>
+      <Button onClick={() => navigate('/dashboard')} size="md" className="mt-6">
         Back to Dashboard
       </Button>
     </div>
@@ -620,74 +683,74 @@ const Editor: React.FC = () => {
         />
       )}
       <div className="h-screen flex flex-col bg-background text-gray-300 overflow-hidden transition-colors duration-300">
-        <header className="h-10 bg-[#1e1e1e] border-b border-[#2b2b2b] flex items-center justify-between px-3 z-20 shrink-0 select-none">
-          <div className="flex items-center gap-3">
+        <header className="h-9 md:h-10 bg-[#1e1e1e] border-b border-[#2b2b2b] flex items-center justify-between px-2 md:px-3 z-20 shrink-0 select-none">
+          <div className="flex items-center gap-2 md:gap-3">
             {isMobile && (
               <div className="flex items-center gap-1">
                 <button onClick={() => navigate('/dashboard')} className="hover:bg-active p-1 rounded text-gray-400 hover:text-white transition-colors" title="Back to Dashboard">
-                    <ArrowLeft className="w-4 h-4" />
+                    <ArrowLeft className="w-3.5 h-3.5 md:w-4 md:h-4" />
                 </button>
                 <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="hover:bg-active p-1 rounded text-gray-400 hover:text-white transition-colors" title="Toggle Explorer">
-                  <Menu className="w-4 h-4" />
+                  <Menu className="w-3.5 h-3.5 md:w-4 md:h-4" />
                 </button>
               </div>
             )}
             <div className="flex items-center gap-2">
               {!isMobile && (
                 <button onClick={() => navigate('/dashboard')} className="hover:bg-active p-1 rounded text-gray-400 hover:text-white transition-colors" title="Back to Dashboard">
-                  <ArrowLeft className="w-4 h-4" />
+                  <ArrowLeft className="w-3.5 h-3.5 md:w-4 md:h-4" />
                 </button>
               )}
-              <span className="font-medium text-sm text-gray-200 truncate max-w-[150px] sm:max-w-[200px]">{project.name}</span>
-              <div className="w-4 h-4 flex items-center justify-center">{renderSaveStatus()}</div>
+              <span className="font-medium text-sm md:text-base text-gray-200 truncate max-w-[120px] md:max-w-[200px] lg:max-w-[300px]">{project.name}</span>
+              <div className="w-4 h-4 flex items-center justify-center" title={getSaveStatusTitle()}>{renderSaveStatus()}</div>
             </div>
           </div>
           <div className="flex items-center gap-1">
             {isMobile ? (
               <>
-              <button onClick={() => { setMobileTab('preview'); setRefreshTrigger(p => p + 1); }} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${mobileTab === 'preview' ? 'text-accent' : 'text-gray-400'}`} title="Preview"><Play className="w-4 h-4" /></button>
-              <button onClick={() => setMobileTab('ai')} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${mobileTab === 'ai' ? 'text-accent' : 'text-gray-400'}`} title="AI Assistant"><Sparkles className="w-4 h-4" /></button>
+              <button onClick={() => { setMobileTab('preview'); setRefreshTrigger(p => p + 1); }} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${mobileTab === 'preview' ? 'text-accent' : 'text-gray-400'}`} title="Preview"><Play className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
+              <button onClick={() => setMobileTab('ai')} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${mobileTab === 'ai' ? 'text-accent' : 'text-gray-400'}`} title="AI Assistant"><Sparkles className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
               </>
             ) : (
-              <button onClick={() => setShowPreview(!showPreview)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${showPreview ? 'text-accent' : 'text-gray-400'}`} title="Toggle Preview Pane"><LayoutTemplate className="w-4 h-4" /></button>
+              <button onClick={() => setShowPreview(!showPreview)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${showPreview ? 'text-accent' : 'text-gray-400'}`} title="Toggle Preview Pane"><LayoutTemplate className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
             )}
             <button onClick={() => setIsSettingsOpen(true)} className="p-1.5 rounded hover:bg-white/10 transition-colors text-gray-400" title="Settings">
-              <Settings className="w-4 h-4" />
+              <Settings className="w-3.5 h-3.5 md:w-4 md:h-4" />
             </button>
             <div className="w-px h-4 bg-gray-600 mx-1"></div>
-            <Button size="sm" variant="secondary" onClick={downloadProject} className="h-7 px-2 text-xs flex items-center gap-1.5"><Download className="w-3.5 h-3.5" /><span className="hidden sm:inline">Export</span></Button>
-            <Button size="sm" onClick={() => forceSave()} className="h-7 px-2 text-xs flex items-center gap-1.5 bg-green-700 hover:bg-green-600"><Save className="w-3.5 h-3.5" /><span className="hidden sm:inline">Save</span></Button>
+            <Button size="xs" className="flex items-center gap-1.5 md:h-8 md:px-3 md:text-sm" variant="secondary" onClick={downloadProject}><Download className="w-3.5 h-3.5" /><span className="hidden sm:inline">Export</span></Button>
+            <Button size="xs" className="flex items-center gap-1.5 bg-green-700 hover:bg-green-600 md:h-8 md:px-3 md:text-sm" onClick={() => forceSave()}><Save className="w-3.5 h-3.5" /><span className="hidden sm:inline">Save</span></Button>
           </div>
         </header>
 
         <main className="flex-1 flex overflow-hidden relative">
           {actionError && (
-             <div className="absolute top-4 right-4 z-[101] p-4 max-w-sm bg-red-500/20 border border-red-500/30 rounded-lg flex items-start gap-3 text-red-300 text-sm animate-fade-in shadow-2xl">
-              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-400" />
+             <div className="absolute top-3 right-3 z-[101] p-3 md:p-4 max-w-xs md:max-w-sm bg-red-500/20 border border-red-500/30 rounded-lg flex items-start gap-2 md:gap-3 text-red-300 text-xs md:text-sm animate-fade-in shadow-2xl">
+              <AlertCircle className="w-4 h-4 md:w-5 md:h-5 shrink-0 mt-0.5 text-red-400" />
               <span>{actionError}</span>
               <button onClick={() => setActionError(null)} className="ml-auto p-1 rounded-full hover:bg-white/10">
-                <X className="w-4 h-4"/>
+                <X className="w-3.5 h-3.5 md:w-4 md:h-4"/>
               </button>
             </div>
           )}
           <div className="flex shrink-0">
-              <div className={`w-12 bg-[#252526] border-r border-[#2b2b2b] flex-col items-center py-2 shrink-0 z-30 ${isMobile ? 'hidden' : 'flex'}`}>
-                <button onClick={() => toggleSidebar('files')} className={`w-12 h-12 flex items-center justify-center relative ${sidebarView === 'files' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Explorer"><Files className="w-6 h-6 stroke-[1.5]" />{sidebarView === 'files' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
-                <button onClick={() => toggleSidebar('search')} className={`w-12 h-12 flex items-center justify-center relative ${sidebarView === 'search' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Search"><Search className="w-6 h-6 stroke-[1.5]" />{sidebarView === 'search' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
-                <button onClick={() => toggleSidebar('ai')} className={`w-12 h-12 flex items-center justify-center relative ${sidebarView === 'ai' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="AI Assistant"><Sparkles className="w-6 h-6 stroke-[1.5]" />{sidebarView === 'ai' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
+              <div className={`w-10 md:w-12 bg-[#252526] border-r border-[#2b2b2b] flex-col items-center py-2 shrink-0 z-30 ${isMobile ? 'hidden' : 'flex'}`}>
+                <button onClick={() => toggleSidebar('files')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'files' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Explorer"><Files className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'files' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
+                <button onClick={() => toggleSidebar('search')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'search' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Search"><Search className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'search' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
+                <button onClick={() => toggleSidebar('ai')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'ai' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="AI Assistant"><Sparkles className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'ai' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
               </div>
-              <div className={`transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-64 lg:w-72' : 'w-0'} overflow-hidden`}>
-                  <div className="w-64 lg:w-72 h-full bg-sidebar border-r border-border flex flex-col shrink-0">
-                      {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={handleFileSelect} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} />}
+              <div className={`transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-56 md:w-64 lg:w-72' : 'w-0'} overflow-hidden`}>
+                  <div className="w-56 md:w-64 lg:w-72 h-full bg-sidebar border-r border-border flex flex-col shrink-0">
+                      {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={handleFileSelect} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />}
                       {sidebarView === 'ai' && <AIChat files={project.files} sessions={chatSessions} activeSessionId={activeSessionId} onSendMessage={handleSendMessage} onRegenerate={handleRegenerate} onClose={() => setIsSidebarOpen(false)} onOpenCheckpoints={() => setIsCheckpointModalOpen(true)} onCreateSession={handleCreateSession} onSwitchSession={setActiveSessionId} onCancel={handleCancelGeneration} onDeleteMessage={handleDeleteMessage} onDeleteSession={handleDeleteSession} />}
-                      {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-8 h-8 mx-auto mb-2 opacity-50" />Global search coming soon</div>}
+                      {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-7 h-7 md:w-8 md:h-8 mx-auto mb-2 opacity-50" />Global search coming soon</div>}
                   </div>
               </div>
           </div>
           
           {isMobile && isSidebarOpen && (
-            <div className="absolute top-0 left-0 h-full w-4/5 max-w-[300px] z-40 bg-sidebar border-r border-border flex flex-col animate-in slide-in-from-left-full duration-300">
-              <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={path => { handleFileSelect(path); setIsSidebarOpen(false); }} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} />
+            <div className="absolute top-0 left-0 h-full w-4/5 max-w-[280px] z-40 bg-sidebar border-r border-border flex flex-col animate-in slide-in-from-left-full duration-300">
+              <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={path => { handleFileSelect(path); setIsSidebarOpen(false); }} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />
             </div>
           )}
           {isMobile && isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="absolute inset-0 bg-black/50 z-30 animate-in fade-in duration-300"></div>}
@@ -700,7 +763,7 @@ const Editor: React.FC = () => {
 
           {((!isMobile && showPreview) || (isMobile && mobileTab === 'preview')) && (
             <div className={`bg-sidebar border-l border-border h-full flex flex-col transition-colors duration-300 ${isMobile ? 'w-full absolute inset-0 z-10' : 'md:w-2/5 lg:w-1/3 shrink-0 relative'}`}>
-              {isMobile && <div className="h-10 flex items-center justify-between px-2 bg-[#1e1e1e] border-b border-[#333] shrink-0"><span className="text-xs font-bold text-gray-400 uppercase">Preview</span><button onClick={() => setMobileTab('editor')}><X className="w-4 h-4 text-gray-400"/></button></div>}
+              {isMobile && <div className="h-9 flex items-center justify-between px-2 bg-[#1e1e1e] border-b border-[#333] shrink-0"><span className="text-xs font-bold text-gray-400 uppercase">Preview</span><button onClick={() => setMobileTab('editor')}><X className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-400"/></button></div>}
               <Preview files={project.files} refreshTrigger={refreshTrigger} />
             </div>
           )}

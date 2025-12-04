@@ -5,10 +5,11 @@ import App from './App';
 // Suppress benign ResizeObserver loop errors commonly caused by Monaco Editor.
 // This is a known issue with the library and doesn't affect functionality.
 // We patch both window.onerror and console.error to catch it.
+const SUPPRESSED_ERROR_MESSAGE = 'ResizeObserver loop completed with undelivered notifications';
 
 // 1. Handle global error events (for uncaught exceptions)
 window.addEventListener('error', (e) => {
-  if (e.message && e.message.includes('ResizeObserver')) {
+  if (e.message && e.message.includes(SUPPRESSED_ERROR_MESSAGE)) {
     // Prevent the error from reaching the console
     e.stopImmediatePropagation();
     e.preventDefault();
@@ -18,22 +19,13 @@ window.addEventListener('error', (e) => {
 // 2. Patch console.error (for errors logged by libraries/browsers directly)
 const originalConsoleError = console.error;
 console.error = (...args: any[]) => {
-  if (args.length > 0) {
-    const firstArg = args[0];
-    let message = '';
+  const shouldSuppress = args.some(arg => 
+    arg && typeof arg.toString === 'function' && arg.toString().includes(SUPPRESSED_ERROR_MESSAGE)
+  );
 
-    // Extract message from string or Error object
-    if (typeof firstArg === 'string') {
-      message = firstArg;
-    } else if (firstArg instanceof Error && firstArg.message) {
-      message = firstArg.message;
-    }
-    
-    // Check if the message contains the ResizeObserver error text
-    if (message.includes('ResizeObserver loop')) {
-      // Suppress the error by not calling the original console.error
-      return;
-    }
+  if (shouldSuppress) {
+    // Suppress the error by not calling the original console.error
+    return;
   }
 
   // For all other errors, call the original console.error

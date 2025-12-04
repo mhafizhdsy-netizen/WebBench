@@ -85,6 +85,15 @@
       }
     </script>
     <style>
+      /* Ensure html, body, and root element take full height for proper layout on mobile */
+      html, body, #root {
+        height: 100%;
+        min-height: 100vh; /* Fallback for browsers that don't support dvh */
+        min-height: 100dvh; /* Dynamic viewport height for better mobile responsiveness */
+        margin: 0;
+        padding: 0;
+      }
+
       :root {
         /* Default Theme (VS Code Dark) */
         --bg-background: #1e1e1e;

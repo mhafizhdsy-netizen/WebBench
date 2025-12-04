@@ -11,13 +11,13 @@ import {
 
 const FileIcon = ({ type }: { type: string }) => {
   switch (type) {
-    case 'html': return <FileCode className="w-4 h-4 text-orange-400" />;
-    case 'css': return <FileCode className="w-4 h-4 text-sky-400" />;
-    case 'javascript': return <FileCode className="w-4 h-4 text-yellow-400" />;
-    case 'json': return <FileJson className="w-4 h-4 text-lime-400" />;
-    case 'markdown': return <FileText className="w-4 h-4 text-indigo-400" />;
-    case 'image': return <FileImage className="w-4 h-4 text-rose-400" />;
-    default: return <FileType className="w-4 h-4 text-gray-500" />;
+    case 'html': return <FileCode className="w-3.5 h-3.5 md:w-4 md:h-4 text-orange-400" />;
+    case 'css': return <FileCode className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400" />;
+    case 'javascript': return <FileCode className="w-3.5 h-3.5 md:w-4 md:h-4 text-yellow-400" />;
+    case 'json': return <FileJson className="w-3.5 h-3.5 md:w-4 md:h-4 text-lime-400" />;
+    case 'markdown': return <FileText className="w-3.5 h-3.5 md:w-4 md:h-4 text-indigo-400" />;
+    case 'image': return <FileImage className="w-3.5 h-3.5 md:w-4 md:h-4 text-rose-400" />;
+    default: return <FileType className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-500" />;
   }
 };
 
@@ -37,7 +37,7 @@ const ContextMenu = ({ x, y, options, onClose }: { x: number, y: number, options
     return (
         <div 
             ref={menuRef}
-            className="fixed z-50 w-48 bg-[#252526] border border-[#454545] rounded-md shadow-2xl py-1 animate-in fade-in zoom-in-95 duration-100"
+            className="fixed z-50 w-40 md:w-48 bg-[#252526] border border-[#454545] rounded-md shadow-2xl py-1 animate-in fade-in zoom-in-95 duration-100"
             style={{ top: y, left: x }}
         >
             {options.map((opt, i) => (
@@ -48,7 +48,7 @@ const ContextMenu = ({ x, y, options, onClose }: { x: number, y: number, options
                       onClose();
                       opt.action();
                     }}
-                    className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 ${opt.isDestructive ? 'text-red-400 hover:bg-red-500/20' : 'text-gray-300 hover:bg-[#094771] hover:text-white'}`}
+                    className={`w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-2 ${opt.isDestructive ? 'text-red-400 hover:bg-red-500/20' : 'text-gray-300 hover:bg-[#094771] hover:text-white'}`}
                 >
                     {opt.icon} {opt.label}
                 </button>
@@ -94,14 +94,14 @@ const ActionModal = ({ config, onClose }: { config: ModalConfig, onClose: () => 
   const targetName = config.type === 'rename' ? config.currentName : config.path;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="w-full max-w-sm bg-sidebar border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-md font-semibold text-white">{titles[config.type]}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 md:p-4">
+      <div className="w-full max-w-xs md:max-w-sm bg-sidebar border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+        <div className="flex items-center justify-between p-3 md:p-4 border-b border-border">
+          <h2 className="text-base md:text-lg font-semibold text-white">{titles[config.type]}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-4 h-4 md:w-5 md:h-5" /></button>
         </div>
         <form onSubmit={handleSubmit}>
-          <div className="p-6">
+          <div className="p-4 md:p-6">
             {(config.type === 'createFile' || config.type === 'createFolder' || config.type === 'rename') && (
               <>
                 <label className="block text-sm font-medium text-gray-400 mb-2">
@@ -113,22 +113,22 @@ const ActionModal = ({ config, onClose }: { config: ModalConfig, onClose: () => 
                   type="text"
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  className="w-full bg-[#3c3c3c] border border-transparent focus:border-accent text-white rounded px-3 py-2 outline-none"
+                  className="w-full bg-[#3c3c3c] border border-transparent focus:border-accent text-white rounded px-3 py-2 text-sm outline-none"
                   placeholder={config.type.includes('Folder') ? 'folder-name' : 'file-name.js'}
                 />
               </>
             )}
             {config.type === 'delete' && (
-              <p className="text-gray-300">
+              <p className="text-xs md:text-sm text-gray-300">
                 Are you sure you want to delete <br />
                 <span className="font-mono text-sm bg-active px-1.5 py-1 rounded my-2 inline-block">{targetName}</span>?<br />
                 This action cannot be undone.
               </p>
             )}
           </div>
-          <div className="flex justify-end gap-3 pt-2 p-4 bg-active/50 border-t border-border">
-            <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
-            <Button type="submit" variant={config.type === 'delete' ? 'danger' : 'primary'} disabled={loading}>
+          <div className="flex justify-end gap-3 pt-2 p-3 md:p-4 bg-active/50 border-t border-border">
+            <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={loading}>Cancel</Button>
+            <Button type="submit" size="sm" variant={config.type === 'delete' ? 'danger' : 'primary'} disabled={loading}>
               {loading && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
               {config.type === 'delete' ? 'Delete' : 'Confirm'}
             </Button>
@@ -151,9 +151,10 @@ interface FileExplorerProps {
   onRename: (oldPath: string, newPath: string) => void;
   onDelete: (path: string) => void;
   onDuplicate: (oldPath: string, newPath: string) => void;
+  isMobile: boolean; // Add isMobile prop
 }
 
-export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, highlightedFiles, onFileSelect, onCreate, onRename, onDelete, onDuplicate }) => {
+export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, highlightedFiles, onFileSelect, onCreate, onRename, onDelete, onDuplicate, isMobile }) => {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ '/': true });
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, path: string, isFolder: boolean } | null>(null);
   const [modalConfig, setModalConfig] = useState<ModalConfig | null>(null);
@@ -344,14 +345,17 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
       return a.name.localeCompare(b.name);
     });
 
+    // Mobile-first indentation: smaller default, scales up for larger screens
+    const indent = (depth * 10 + 8) + (isMobile ? 0 : depth * 6 + 4); 
+
     return entries.map((item: any) => {
       const isHighlighted = highlightedFiles.has(item.path);
       if (item.isFile) {
         return (
           <div 
             key={item.path}
-            className={`flex items-center gap-2 py-1 cursor-pointer text-sm border-l-2 transition-colors duration-100 ${activeFile === item.path ? 'bg-[#37373d] text-white border-accent' : 'text-gray-400 hover:bg-[#2a2d2e] hover:text-gray-200 border-transparent'} ${isHighlighted ? 'highlight-ai-change' : ''}`}
-            style={{ paddingLeft: `${depth * 16 + 12}px` }}
+            className={`flex items-center gap-2 py-1 cursor-pointer text-xs md:text-sm border-l-2 transition-colors duration-100 ${activeFile === item.path ? 'bg-[#37373d] text-white border-accent' : 'text-gray-400 hover:bg-[#2a2d2e] hover:text-gray-200 border-transparent'} ${isHighlighted ? 'highlight-ai-change' : ''}`}
+            style={{ paddingLeft: `${indent}px` }}
             onClick={() => onFileSelect(item.path)}
             onContextMenu={(e) => openContextMenu(e, item.path, false)}
           >
@@ -364,13 +368,13 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
       return (
         <div key={item.path}>
           <div 
-            className={`flex items-center gap-1.5 py-1 cursor-pointer text-sm font-medium text-gray-300 hover:bg-[#2a2d2e] transition-colors duration-100 ${isHighlighted ? 'highlight-ai-change' : ''}`}
-            style={{ paddingLeft: `${depth * 16 + 4}px` }}
+            className={`flex items-center gap-1.5 py-1 cursor-pointer text-xs md:text-sm font-medium text-gray-300 hover:bg-[#2a2d2e] transition-colors duration-100 ${isHighlighted ? 'highlight-ai-change' : ''}`}
+            style={{ paddingLeft: `${indent - 4}px` }} // Adjust for chevron icon
             onClick={() => setExpandedFolders(p => ({...p, [item.path]: !p[item.path]}))}
             onContextMenu={(e) => openContextMenu(e, item.path, true)}
           >
-            <span className="opacity-70 shrink-0">{isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</span>
-            <span className="shrink-0">{isExpanded ? <FolderOpen className="w-4 h-4 text-accent" /> : <Folder className="w-4 h-4 text-accent" />}</span>
+            <span className="opacity-70 shrink-0">{isExpanded ? <ChevronDown className="w-3.5 h-3.5 md:w-4 md:h-4" /> : <ChevronRight className="w-3.5 h-3.5 md:w-4 md:h-4" />}</span>
+            <span className="shrink-0">{isExpanded ? <FolderOpen className="w-3.5 h-3.5 md:w-4 md:h-4 text-accent" /> : <Folder className="w-3.5 h-3.5 md:w-4 md:h-4 text-accent" />}</span>
             <span className="truncate select-none">{item.name}</span>
           </div>
           {isExpanded && renderTree(item, depth + 1)}
@@ -385,17 +389,17 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
     const parentPath = isFolder ? path : path.substring(0, path.lastIndexOf('/')) || '/';
     
     const options: any[] = [
-        { label: 'New File', action: () => handleCreate(parentPath, false), icon: <FilePlus className="w-3.5 h-3.5" /> },
-        { label: 'New Folder', action: () => handleCreate(parentPath, true), icon: <FolderPlus className="w-3.5 h-3.5" /> },
+        { label: 'New File', action: () => handleCreate(parentPath, false), icon: <FilePlus className="w-3 h-3 md:w-3.5 md:h-3.5" /> },
+        { label: 'New Folder', action: () => handleCreate(parentPath, true), icon: <FolderPlus className="w-3 h-3 md:w-3.5 md:h-3.5" /> },
     ];
     
     if (!isFolder) {
-      options.push({ label: 'Duplicate', action: () => handleDuplicate(path), icon: <Copy className="w-3.5 h-3.5" /> });
+      options.push({ label: 'Duplicate', action: () => handleDuplicate(path), icon: <Copy className="w-3 h-3 md:w-3.5 md:h-3.5" /> });
     }
 
     options.push(
-      { label: 'Rename', action: () => handleRename(path), icon: <Edit2 className="w-3.5 h-3.5" /> },
-      { label: 'Delete', action: () => handleDelete(path), icon: <Trash2 className="w-3.5 h-3.5" />, isDestructive: true }
+      { label: 'Rename', action: () => handleRename(path), icon: <Edit2 className="w-3 h-3 md:w-3.5 md:h-3.5" /> },
+      { label: 'Delete', action: () => handleDelete(path), icon: <Trash2 className="w-3 h-3 md:w-3.5 md:h-3.5" />, isDestructive: true }
     );
     
     return options;
@@ -405,17 +409,17 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
     <div className="h-full flex flex-col bg-sidebar select-none relative">
       {modalConfig && <ActionModal config={modalConfig} onClose={() => setModalConfig(null)} />}
 
-      <div className="h-9 px-4 flex items-center justify-between group shrink-0">
+      <div className="h-8 md:h-9 px-3 md:px-4 flex items-center justify-between group shrink-0">
         <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Explorer</span>
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={() => handleCreate('/', false)} className="p-1 hover:bg-white/10 rounded text-gray-300 hover:text-white" title="New File at Root"><FilePlus className="w-4 h-4" /></button>
-          <button onClick={() => handleCreate('/', true)} className="p-1 hover:bg-white/10 rounded text-gray-300 hover:text-white" title="New Folder at Root"><FolderPlus className="w-4 h-4" /></button>
+          <button onClick={() => handleCreate('/', false)} className="p-1 hover:bg-white/10 rounded text-gray-300 hover:text-white" title="New File at Root"><FilePlus className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
+          <button onClick={() => handleCreate('/', true)} className="p-1 hover:bg-white/10 rounded text-gray-300 hover:text-white" title="New Folder at Root"><FolderPlus className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
         </div>
       </div>
       
       <div className="px-2 pb-2 border-b border-border">
         <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 pointer-events-none" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 md:w-3.5 md:h-3.5 text-gray-500 pointer-events-none" />
           <input
             type="text"
             placeholder="Search files..."
@@ -425,7 +429,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
           />
           {searchQuery && (
             <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white">
-              <X className="w-3.5 h-3.5" />
+              <X className="w-3 h-3 md:w-3.5 md:h-3.5" />
             </button>
           )}
         </div>

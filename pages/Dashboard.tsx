@@ -108,12 +108,12 @@ const Dashboard: React.FC = () => {
           promises.push(
             zipEntry.async("string").then(content => {
               const path = '/' + relativePath; 
-              let type: any = 'plaintext';
+              let type: File['type'] = 'plaintext';
               if (path.endsWith('.html')) type = 'html';
               else if (path.endsWith('.css')) type = 'css';
               else if (path.endsWith('.js')) type = 'javascript';
               else if (path.endsWith('.json')) type = 'json';
-              else if (path.match(/\.(jpg|jpeg|png|gif|svg)$/)) type = 'image';
+              else if (path.match(/\.(jpg|jpeg|png|gif|svg)$/i)) type = 'image';
 
               importedFiles[path] = {
                 path,
@@ -190,7 +190,7 @@ const Dashboard: React.FC = () => {
         hash |= 0;
     }
     const iconIndex = Math.abs(hash) % ProjectIcons.length;
-    return React.createElement(ProjectIcons[iconIndex], { className: "text-accent w-7 h-7" });
+    return React.createElement(ProjectIcons[iconIndex], { className: "text-accent w-6 h-6 md:w-7 md:h-7" });
   };
 
   return (
@@ -228,58 +228,58 @@ const Dashboard: React.FC = () => {
         />
 
         {/* Header */}
-        <header className="h-16 border-b border-border bg-sidebar flex items-center justify-between px-4 lg:px-8 sticky top-0 z-20 transition-colors duration-300">
-          <div className="flex items-center gap-3 group cursor-pointer" onClick={() => navigate('/dashboard')}>
-            <div className="w-9 h-9 flex items-center justify-center transition-transform group-hover:scale-105">
+        <header className="h-12 md:h-14 border-b border-border bg-sidebar flex items-center justify-between px-3 md:px-4 lg:px-8 sticky top-0 z-20 transition-colors duration-300">
+          <div className="flex items-center gap-2 group cursor-pointer" onClick={() => navigate('/dashboard')}>
+            <div className="w-8 h-8 md:w-9 md:h-9 flex items-center justify-center transition-transform group-hover:scale-105">
               <WebBenchLogo />
             </div>
-            <span className="font-bold text-white text-lg tracking-tight hidden sm:block">WebBench</span>
+            <span className="font-bold text-white text-base md:text-lg tracking-tight hidden md:block">WebBench</span>
           </div>
 
-          <div className="flex-1 max-w-md mx-4">
+          <div className="flex-1 max-w-xs md:max-w-md mx-2 md:mx-4">
             <div className="relative group">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-accent transition-colors" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 md:w-4 md:h-4 text-gray-500 group-focus-within:text-accent transition-colors" />
               <input 
                 type="text" 
                 placeholder="Search projects..." 
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-background border border-border focus:border-accent text-white rounded-lg pl-10 pr-4 py-2 outline-none text-sm transition-all duration-300 focus:ring-1 focus:ring-accent/20"
+                className="w-full bg-background border border-border focus:border-accent text-white rounded-lg pl-9 pr-3 py-1.5 text-xs md:pl-10 md:pr-4 md:py-2 md:text-sm outline-none transition-all duration-300 focus:ring-1 focus:ring-accent/20"
               />
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => setIsSettingsOpen(true)} title="Settings">
-              <Settings className="w-5 h-5" />
+          <div className="flex items-center gap-1 md:gap-2">
+            <Button variant="icon" onClick={() => setIsSettingsOpen(true)} title="Settings">
+              <Settings className="w-4 h-4 md:w-5 md:h-5" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={handleLogout} title="Logout">
-              <LogOut className="w-5 h-5" />
+            <Button variant="icon" onClick={handleLogout} title="Logout">
+              <LogOut className="w-4 h-4 md:w-5 md:h-5" />
             </Button>
           </div>
         </header>
 
         {/* Main Content */}
-        <main className="p-4 lg:p-8 max-w-7xl mx-auto">
+        <main className="p-3 md:p-6 lg:p-8 max-w-7xl mx-auto">
           {error && (
-            <div className="p-4 mb-6 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3 text-red-400 text-sm animate-fade-in">
-              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+            <div className="p-3 md:p-4 mb-4 md:mb-6 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-2 md:gap-3 text-red-400 text-xs md:text-sm animate-fade-in">
+              <AlertCircle className="w-4 h-4 md:w-5 md:h-5 shrink-0 mt-0.5" />
               <span>{error}</span>
               <button onClick={() => setError(null)} className="ml-auto p-1 rounded-full hover:bg-white/10">
-                <X className="w-4 h-4"/>
+                <X className="w-3.5 h-3.5 md:w-4 md:h-4"/>
               </button>
             </div>
           )}
           
-          <div className="flex items-center justify-between mb-8">
-            <h2 className="text-2xl font-bold text-white">Your Projects</h2>
-            <div className="flex gap-3">
-              <Button onClick={handleImportClick} variant="secondary" className="gap-2 h-8 px-3 text-xs" disabled={isImporting}>
-                <Upload className="w-4 h-4" />
+          <div className="flex items-center justify-between mb-6 md:mb-8">
+            <h2 className="text-xl md:text-2xl font-bold text-white">Your Projects</h2>
+            <div className="flex gap-2 md:gap-3">
+              <Button onClick={handleImportClick} variant="secondary" size="xs" className="gap-1.5 md:gap-2 md:h-8 md:px-3 md:text-sm" disabled={isImporting}>
+                <Upload className="w-3.5 h-3.5 md:w-4 md:h-4" />
                 {isImporting ? 'Importing...' : 'Import'}
               </Button>
-              <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2 shadow-lg shadow-accent/20 hover:shadow-accent/40 transition-all h-8 px-3 text-xs">
-                <Plus className="w-4 h-4" />
+              <Button onClick={() => setIsCreateModalOpen(true)} size="xs" className="gap-1.5 md:gap-2 md:h-8 md:px-3 md:text-sm shadow-lg shadow-accent/20 hover:shadow-accent/40 transition-all">
+                <Plus className="w-3.5 h-3.5 md:w-4 md:h-4" />
                 New Project
               </Button>
             </div>
@@ -287,58 +287,58 @@ const Dashboard: React.FC = () => {
 
           {loading ? (
             <div className="h-64 flex flex-col items-center justify-center">
-              <WebBenchLoader size="lg" text="Loading Projects..." />
+              <WebBenchLoader size="md" text="Loading Projects..." />
             </div>
           ) : projects.length === 0 && !error ? (
-            <div className="flex flex-col items-center justify-center py-20 border border-dashed border-border rounded-xl bg-sidebar/30">
-              <div className="w-20 h-20 bg-active rounded-full flex items-center justify-center mb-6 animate-pulse">
-                <FolderOpen className="w-10 h-10 text-gray-500" />
+            <div className="flex flex-col items-center justify-center py-10 md:py-20 border border-dashed border-border rounded-xl bg-sidebar/30">
+              <div className="w-16 h-16 md:w-20 md:h-20 bg-active rounded-full flex items-center justify-center mb-4 md:mb-6 animate-pulse">
+                <FolderOpen className="w-8 h-8 md:w-10 md:h-10 text-gray-500" />
               </div>
-              <h3 className="text-xl font-medium text-white mb-2">No projects yet</h3>
-              <p className="text-gray-500 mb-8 text-center max-w-xs">Create your first project to start building the web with AI superpowers.</p>
-              <Button onClick={() => setIsCreateModalOpen(true)} size="lg">Create Project</Button>
+              <h3 className="text-lg md:text-xl font-medium text-white mb-1 md:mb-2">No projects yet</h3>
+              <p className="text-xs md:text-sm text-gray-500 mb-6 md:mb-8 text-center max-w-xs">Create your first project to start building the web with AI superpowers.</p>
+              <Button onClick={() => setIsCreateModalOpen(true)} size="md">Create Project</Button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
               {filteredProjects.map((project) => (
                 <div 
                   key={project.id}
                   onClick={() => navigate(`/editor/${project.id}`)}
-                  className="bg-sidebar border border-border rounded-xl p-5 hover:border-accent hover:shadow-xl hover:shadow-black/20 cursor-pointer group transition-all duration-300 relative overflow-hidden"
+                  className="bg-sidebar border border-border rounded-xl p-4 md:p-5 hover:border-accent hover:shadow-xl hover:shadow-black/20 cursor-pointer group transition-all duration-300 relative overflow-hidden"
                 >
                   <button 
                       onClick={(e) => { e.stopPropagation(); setActiveContextMenu(activeContextMenu === project.id ? null : project.id); }}
-                      className="absolute top-3 right-3 p-2 bg-background/50 hover:bg-active rounded-full text-gray-400 hover:text-white transition-colors backdrop-blur-sm z-10"
+                      className="absolute top-2 right-2 md:top-3 md:right-3 p-1.5 md:p-2 bg-background/50 hover:bg-active rounded-full text-gray-400 hover:text-white transition-colors backdrop-blur-sm z-10"
                       aria-label="Project options"
                     >
-                      <MoreVertical className="w-4 h-4" />
+                      <MoreVertical className="w-3.5 h-3.5 md:w-4 md:h-4" />
                     </button>
 
                   {activeContextMenu === project.id && (
-                      <div ref={contextMenuRef} className="absolute top-12 right-3 z-20 w-40 bg-[#2d2d30] border border-border rounded-lg shadow-2xl py-1 animate-in fade-in zoom-in-95">
-                        <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'rename', project }); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Edit className="w-3.5 h-3.5"/>Rename</button>
-                        <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'duplicate', project }); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Copy className="w-3.5 h-3.5"/>Duplicate</button>
+                      <div ref={contextMenuRef} className="absolute top-10 right-2 md:top-12 md:right-3 z-20 w-36 md:w-40 bg-[#2d2d30] border border-border rounded-lg shadow-2xl py-1 animate-in fade-in zoom-in-95">
+                        <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'rename', project }); setActiveContextMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Edit className="w-3 h-3 md:w-3.5 md:h-3.5"/>Rename</button>
+                        <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'duplicate', project }); setActiveContextMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Copy className="w-3 h-3 md:w-3.5 md:h-3.5"/>Duplicate</button>
                         <div className="my-1 h-px bg-border mx-1"></div>
-                        <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'delete', project }); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 text-red-400 hover:bg-red-500/20 transition-colors"><Trash2 className="w-3.5 h-3.5"/>Delete</button>
+                        <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'delete', project }); setActiveContextMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-red-400 hover:bg-red-500/20 transition-colors"><Trash2 className="w-3 h-3 md:w-3.5 md:h-3.5"/>Delete</button>
                       </div>
                     )}
 
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-active to-background flex items-center justify-center border border-white/5 shadow-inner group-hover:scale-105 transition-transform duration-300">
+                  <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
+                    <div className="w-12 h-12 md:w-14 md:h-14 rounded-lg bg-gradient-to-br from-active to-background flex items-center justify-center border border-white/5 shadow-inner group-hover:scale-105 transition-transform duration-300">
                       {getProjectIcon(project.id)}
                     </div>
                     <div className="overflow-hidden">
-                      <h3 className="text-lg font-bold text-white truncate group-hover:text-accent transition-colors">{project.name}</h3>
-                      <p className="text-xs text-gray-500 truncate mt-1">ID: {project.id.slice(0, 8)}...</p>
+                      <h3 className="text-base font-semibold text-white truncate group-hover:text-accent transition-colors md:text-lg">{project.name}</h3>
+                      <p className="text-xs text-gray-500 truncate mt-0.5 md:mt-1">ID: {project.id.slice(0, 8)}...</p>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between text-xs text-gray-500 pt-4 border-t border-border mt-2">
-                    <div className="flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5" />
+                  <div className="flex items-center justify-between text-xs text-gray-500 pt-3 md:pt-4 border-t border-border mt-1 md:mt-2">
+                    <div className="flex items-center gap-1 md:gap-1.5">
+                      <Clock className="w-3 h-3 md:w-3.5 md:h-3.5" />
                       <span>{new Date(project.updatedAt).toLocaleDateString()}</span>
                     </div>
-                    <span className="bg-active px-2.5 py-1 rounded-full text-gray-400 border border-white/5 group-hover:border-white/10 transition-colors">
+                    <span className="bg-active px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-gray-400 border border-white/5 group-hover:border-white/10 transition-colors">
                       {Object.keys(project.files).length} files
                     </span>
                   </div>

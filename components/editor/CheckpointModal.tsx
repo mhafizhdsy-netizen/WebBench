@@ -78,7 +78,7 @@ export const CheckpointModal: React.FC<CheckpointModalProps> = ({ isOpen, onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="w-full max-w-6xl bg-sidebar border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in duration-200 flex flex-col h-[85vh]">
+      <div className="w-full max-w-6xl bg-sidebar border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in duration-200 flex flex-col h-full max-h-[90vh]">
         <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
           <div className="flex items-center gap-3">
             <History className="w-5 h-5 text-cyan-400" />
@@ -87,8 +87,8 @@ export const CheckpointModal: React.FC<CheckpointModalProps> = ({ isOpen, onClos
           <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
         </div>
         
-        <div className="flex-1 flex min-h-0">
-          <div className="w-1/4 max-w-sm bg-background border-r border-border overflow-y-auto custom-scrollbar flex flex-col">
+        <div className="flex-1 flex flex-col md:flex-row min-h-0">
+          <div className="w-full md:w-1/4 md:max-w-sm bg-background border-b md:border-b-0 md:border-r border-border overflow-y-auto custom-scrollbar flex flex-col">
             <div className="p-2 sticky top-0 bg-background z-10 border-b border-border flex items-center justify-between">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2">Saved Checkpoints</span>
                 <Button onClick={onCreate} size="sm" variant="secondary" className="h-7 px-2 text-xs flex items-center gap-1.5">
@@ -118,7 +118,7 @@ export const CheckpointModal: React.FC<CheckpointModalProps> = ({ isOpen, onClos
             )}
           </div>
           
-          <div className="w-1/4 max-w-xs bg-sidebar border-r border-border overflow-y-auto custom-scrollbar">
+          <div className="w-full md:w-1/4 md:max-w-xs bg-sidebar border-b md:border-b-0 md:border-r border-border overflow-y-auto custom-scrollbar">
              <div className="p-2 sticky top-0 bg-sidebar z-10 border-b border-border">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2">Files in Checkpoint</span>
             </div>

@@ -7,10 +7,10 @@ Your mission is to transform user prompts into stunning, production-ready websit
 Your work should be indistinguishable from that of a high-end digital agency, drawing inspiration from modern web builders like V0.dev, Framer, and AI Studio.
 
 CORE RESPONSIBILITIES:
-1.  **FULL FILE SYSTEM AUTONOMY**: You have the freedom to Create, Update, and DELETE any files or folders to best fulfill the user's request and maintain a clean, professional project structure.
-    -   **DELETE UNUSED FILES**: Be proactive. If you implement a new styling approach, you MUST delete any now-unnecessary CSS files.
+1.  **FULL FILE SYSTEM AUTONOMY - PRIORITY ONE**: You have the absolute freedom and mandate to Create, Update, and DELETE any files or folders to best fulfill the user's request and maintain a clean, professional project structure.
+    -   **DELETE UNUSED FILES**: Be proactive. If you implement a new styling approach, you MUST delete any now-unnecessary CSS files. If a component is no longer needed, delete its file.
     -   **CREATE NEW FILES/FOLDERS**: Create new files (e.g., /js/animations.js) or folders (e.g., /assets/, /components/) if it leads to a better-organized project. For example, a project with many UI elements might benefit from a /components folder for JS logic.
-    -   To create a folder, create a "/folder/.keep" file.
+    -   To create a folder, you MUST create a "/folder/.keep" file inside it. For example, to create a 'components' folder, create '/components/.keep'.
 
 2.  **USE GOOGLE SEARCH**: When a user's request requires up-to-date information, specific technical details (like new library versions or APIs), or knowledge beyond your training data, you MUST use the search tool.
 
@@ -24,8 +24,6 @@ CORE RESPONSIBILITIES:
     -   **IMAGES**: Use reliable placeholder services: \`https://picsum.photos/seed/{keyword}/800/600\` for photos and \`https://placehold.co/600x400?text=Hello\` for placeholders.
 
 ## 🎨 ENHANCED AI CODE GENERATION INSTRUCTION - PREMIUM QUALITY
-
-**Tambahkan section ini ke System Prompt AI untuk menghasilkan code berkualitas tinggi seperti v0, IDX Project, Firebase Studio:**
 
 ---
 
@@ -51,9 +49,9 @@ CORE RESPONSIBILITIES:
 <script type="module">
   import * as Dialog from 'https://cdn.skypack.dev/@radix-ui/react-dialog';
   import * as DropdownMenu from 'https://cdn.skypack.dev/@radix-ui/react-dropdown-menu';
-  import * as Tabs from 'https://cdn.skypack.dev/@radix-ui/react-tabs';
+  import *s Tabs from 'https://cdn.skypack.dev/@radix-ui/react-tabs';
   import * as Accordion from 'https://cdn.skypack.dev/@radix-ui/react-accordion';
-  import * as Popover from 'https://cdn.skypack.dev/@radix-ui/react-popover';
+  import *s Popover from 'https://cdn.skypack.dev/@radix-ui/react-popover';
 </script>
 
 // 3. FRAMER MOTION (For Animations)
@@ -895,16 +893,63 @@ export const generateCodeStream = async (
     ${fileContext}
 
     USER REQUEST: "${prompt}"
+
+    ---
+    ## 🚨 MANDATORY RESPONSE FORMAT 🚨
+    Your response MUST follow this exact sequence. Failure to do so will result in an unusable output.
+
+    **1. Code Implementation (Markdown Blocks):**
+    -   Generate all necessary code changes inside markdown code blocks (e.g., \`\`\`html).
+    -   **CRITICAL:** The very first line inside EACH code block MUST be a comment containing the full, absolute file path. Example: \`// /js/main.js\` or \`<!-- /index.html -->\`.
+
+    **2. Summary of Changes (Text):**
+    -   After all code blocks, provide a summary of your changes in Indonesian. Use this format:
+        -   **Ringkasan Perubahan:** One or two sentences explaining the main goal.
+        -   **Penjelasan Detail:** Numbered bullet points explaining what you changed in each file and why, including reasons for creating/deleting files.
+        -   **Checklist Kualitas:** A checklist of fulfilled requirements from the system prompt.
+
+    **3. JSON Execution Block (The Final Output):**
+    -   This is the **VERY LAST** part of your response. It's a single, final \`\`\`json block.
+    -   It contains ALL file operations (create, update, delete).
+    -   **JSON Schema:**
+        -   A single root object: \`{ "files": [...] }\`
+        -   The \`files\` key is an array of objects. Each object represents one file operation:
+            -   \`"action"\`: A string, either "create", "update", or "delete".
+            -   \`"path"\`: The full, absolute path to the file (e.g., "/css/style.css").
+            -   \`"type"\`: (For "create"/"update") The file type string (e.g., "html", "css").
+            -   \`"content"\`: (For "create"/"update") The ENTIRE file content as a SINGLE, VALID, ESCAPED JSON string. All newlines must be \`\\n\`, quotes \`\\"\`, backslashes \`\\\\\`.
+
+    **EXAMPLE OF A PERFECT FINAL RESPONSE (user: "change h1 to blue"):**
     
-    INSTRUCTIONS:
-    1.  Think holistically. Analyze the entire project to determine the best course of action.
-    2.  If the user request is about a recent topic or requires external information, use the Google Search tool.
-    3.  Show code in Markdown first (FIRST LINE MUST BE FILE PATH COMMENT).
-    4.  Output JSON Execution Block at the end ONLY IF CHANGING FILES.
-    5.  Use the "delete" action if files become unnecessary.
-    6.  STRICTLY ESCAPE JSON STRINGS.
-    7.  **BE IMPRESSIVE**: If the user prompt is short (e.g. "make a portfolio"), use the mandatory tech stack (Tailwind, GSAP) to build a complete, high-quality solution instantly. This includes creating and deleting files to achieve the best structure.
-    8.  **IMAGES**: Use https://placehold.co or https://picsum.photos for images.
+    \`\`\`css
+    // /css/style.css
+    .hero h1 {
+        color: blue;
+    }
+    \`\`\`
+
+    **Ringkasan Perubahan:**
+    Saya mengubah warna teks untuk elemen h1 di hero section menjadi biru.
+
+    **Penjelasan Detail:**
+    -   \`/css/style.css\`: Memperbarui file untuk mengubah warna h1 menjadi biru.
+
+    **Checklist Kualitas:**
+    - ✅ Menggunakan class CSS yang sudah ada.
+
+    \`\`\`json
+    {
+      "files": [
+        {
+          "action": "update",
+          "path": "/css/style.css",
+          "type": "css",
+          "content": ":root {\\n    --bg-color: #0f172a;\\n    --text-color: #e2e8f0;\\n    --primary: #3b82f6;\\n    --secondary: #64748b;\\n    --accent: #8b5cf6;\\n    --card-bg: rgba(30, 41, 59, 0.5);\\n}\\n\\n* { box-sizing: border-box; margin: 0; padding: 0; }\\n\\nbody {\\n    background-color: var(--bg-color);\\n    color: var(--text-color);\\n    font-family: 'Inter', sans-serif;\\n    line-height: 1.6;\\n    overflow-x: hidden;\\n}\\n\\n.wrapper {\\n    max-width: 1200px;\\n    margin: 0 auto;\\n    padding: 0 20px;\\n    min-height: 100vh;\\n    display: flex;\\n    flex-direction: column;\\n}\\n\\n/* Navbar */\\n.navbar {\\n    display: flex;\\n    justify-content: space-between;\\n    align-items: center;\\n    padding: 20px 0;\\n    position: relative;\\n    z-index: 10;\\n}\\n\\n.logo {\\n    font-weight: 700;\\n    font-size: 1.5rem;\\n    color: white;\\n}\\n\\n.nav-links { display: flex; gap: 20px; items-center; }\\n.nav-links a { color: var(--secondary); text-decoration: none; font-size: 0.9rem; transition: color 0.3s; }\\n.nav-links a:hover { color: white; }\\n\\n.mobile-menu-btn { display: none; background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; }\\n.mobile-menu { \\n    display: none; \\n    flex-direction: column; \\n    background: #1e293b; \\n    padding: 20px; \\n    position: absolute; \\n    top: 70px; \\n    right: 20px; \\n    border-radius: 8px; \\n    box-shadow: 0 10px 25px rgba(0,0,0,0.5);\\n    z-index: 100;\\n}\\n.mobile-menu a { color: white; text-decoration: none; padding: 10px 0; border-bottom: 1px solid #334155; }\\n.mobile-menu.active { display: flex; }\\n\\n/* Hero */\\n.hero {\\n    flex: 1;\\n    display: flex;\\n    align-items: center;\\n    gap: 50px;\\n    padding: 50px 0;\\n    min-height: 70vh;\\n}\\n\\n.content { flex: 1; }\\n\\nh1 {\\n    font-size: 3.5rem;\\n    line-height: 1.1;\\n    margin-bottom: 20px;\\n    font-weight: 700;\\n    color: blue;\\n}\\n\\n.gradient-text {\\n    background: linear-gradient(to right, var(--primary), var(--accent));\\n    -webkit-background-clip: text;\\n    -webkit-text-fill-color: transparent;\\n}\\n\\np {\\n    color: var(--secondary);\\n    font-size: 1.1rem;\\n    margin-bottom: 30px;\\n    max-width: 500px;\\n}\\n\\n.buttons { display: flex; gap: 15px; flex-wrap: wrap; }\\n\\nbutton {\\n    padding: 12px 24px;\\n    border-radius: 8px;\\n    font-weight: 500;\\n    cursor: pointer;\\n    transition: all 0.2s;\\n    font-family: inherit;\\n}\\n\\n.btn-primary { background: var(--primary); color: white; border: none; }\\n.btn-primary:hover { background: #2563eb; transform: translateY(-2px); }\\n\\n.btn-secondary { background: transparent; color: white; border: 1px solid var(--secondary); }\\n.btn-secondary:hover { border-color: white; }\\n\\n.btn-sm { padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 6px; color: white !important; }\\n\\n/* Visual / Glassmorphism */\\n.visual { flex: 1; display: flex; justify-content: center; }\\n\\n.glass {\\n    background: rgba(255, 255, 255, 0.05);\\n    backdrop-filter: blur(10px);\\n    border: 1px solid rgba(255, 255, 255, 0.1);\\n    border-radius: 16px;\\n    padding: 20px;\\n    width: 100%;\\n    max-width: 400px;\\n    box-shadow: 0 20px 50px rgba(0,0,0,0.3);\\n    transform: rotate(-3deg);\\n    transition: transform 0.5s;\\n}\\n\\n.glass:hover { transform: rotate(0) scale(1.02); }\\n\\n.card-header { display: flex; gap: 8px; margin-bottom: 20px; }\\n.dot { width: 12px; height: 12px; border-radius: 50%; }\\n.red { background: #ff5f56; }\\n.yellow { background: #ffbd2e; }\\n.green { background: #27c93f; }\\n\\n.skeleton-line { height: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; margin-bottom: 12px; }\\n.w-75 { width: 75%; }\\n.w-50 { width: 50%; }\\n.w-full { width: 100%; }\\n\\n#output {\\n    margin-top: 20px; padding: 10px; background: rgba(59, 130, 246, 0.1);\\n    border-left: 3px solid var(--primary); color: var(--primary); font-size: 0.9rem;\\n}\\n.hidden { display: none; }\\n\\n/* Features Section */\\n.features {\\n    display: grid;\\n    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));\\n    gap: 30px;\\n    padding: 50px 0;\\n    border-top: 1px solid #1e293b;\\n}\\n\\n.feature-card {\\n    background: var(--card-bg);\\n    padding: 25px;\\n    border-radius: 12px;\\n    border: 1px solid #1e293b;\\n    transition: transform 0.2s;\\n}\\n\\n.feature-card:hover { transform: translateY(-5px); border-color: var(--primary); }\\n.feature-card h3 { color: white; margin-bottom: 10px; }\\n.feature-card p { font-size: 0.95rem; }\\n\\n/* Footer */\\nfooter {\\n    padding: 20px 0;\\n    text-align: center;\\n    border-top: 1px solid #1e293b;\\n    margin-top: auto; /* Pushes footer to bottom in flex container */\\n    font-size: 0.9rem;\\n    color: var(--secondary);\\n}\\n\\n/* Responsive Media Queries */\\n@media (max-width: 768px) {\\n    .nav-links { display: none; }\\n    .mobile-menu-btn { display: block; }\\n    \\n    .hero { flex-direction: column-reverse; text-align: center; gap: 30px; }\\n    .content { display: flex; flex-direction: column; align-items: center; }\\n    h1 { font-size: 2.5rem; }\\n    p { margin: 0 auto 30px; }\\n    .buttons { justify-content: center; }\\n    .glass { transform: rotate(0); max-width: 100%; }\\n}"
+        }
+      ]
+    }
+    \`\`\`
+    ---
   `;
 
   let contentsPayload: any;

@@ -542,7 +542,7 @@ export const projectService = {
             attachments: m.attachments,
             sources: m.sources,
             completedFiles: m.completed_files,
-            isError: m.is_error,
+            isError: m.is_error || false,
           }))
           .sort((a: ChatMessage, b: ChatMessage) => a.timestamp - b.timestamp),
       }));
@@ -595,7 +595,7 @@ export const projectService = {
         attachments: message.attachments,
         sources: message.sources,
         completed_files: message.completedFiles,
-        is_error: message.isError,
+        // is_error: message.isError, // REMOVED to prevent schema mismatch error
       };
       
       const { data, error } = await supabase
@@ -618,7 +618,7 @@ export const projectService = {
           attachments: data.attachments,
           sources: data.sources,
           completedFiles: data.completed_files,
-          isError: data.is_error,
+          isError: data.is_error || message.isError || false,
           timestamp: new Date(data.created_at).getTime(),
       };
     } catch (error: any) {

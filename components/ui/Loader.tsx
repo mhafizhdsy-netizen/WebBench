@@ -13,11 +13,12 @@ export const WebBenchLoader: React.FC<LoaderProps> = ({
   className = '',
   text
 }) => {
+  // Mobile-first sizing: default (no prefix) is smallest, then scale up with md: / lg:
   const sizeClasses = {
-    sm: "w-6 h-6",
-    md: "w-12 h-12",
-    lg: "w-24 h-24",
-    xl: "w-32 h-32"
+    sm: "w-5 h-5", // Smallest size
+    md: "w-10 h-10",
+    lg: "w-20 h-20",
+    xl: "w-28 h-28"
   };
 
   const LoaderIcon = () => (
@@ -59,7 +60,7 @@ export const WebBenchLoader: React.FC<LoaderProps> = ({
           <div className="absolute inset-0 bg-accent/20 blur-xl rounded-full -z-10 animate-pulse"></div>
         </div>
         {text && (
-          <div className="mt-6 text-gray-400 font-medium tracking-wider text-sm animate-pulse">
+          <div className="mt-4 md:mt-6 text-gray-400 font-medium tracking-wider text-xs md:text-sm animate-pulse">
             {text}
           </div>
         )}
