@@ -416,66 +416,68 @@ export const AIChat: React.FC<AIChatProps> = ({ files, activeFile, messages, onS
       )}
 
       <div className="bg-sidebar shrink-0 p-4 border-t border-border shadow-2xl">
-        {!isLoading && (
-          <div className="mb-3 animate-fade-in">
-             <div className="flex items-center justify-between mb-2">
-                <button onClick={() => setIsIdeasOpen(!isIdeasOpen)} className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider hover:text-gray-300 transition-colors">
-                   <Lightbulb className="w-3 h-3 text-yellow-500" />
-                   <span>Ideas</span>
-                   <ChevronDown className={`w-3.5 h-3.5 ml-1 transition-transform ${isIdeasOpen ? 'rotate-0' : '-rotate-90'}`} />
-                </button>
-                <button onClick={regenerateSuggestions} className="text-gray-500 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors" title="Get new ideas"><RefreshCw className="w-3 h-3" /></button>
-             </div>
-             {isIdeasOpen && (
-                <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 mask-linear-fade animate-fade-in">
-                    {suggestions.map((suggestion, idx) => (
-                    <button key={idx} onClick={() => handleSend(suggestion)} className="whitespace-nowrap px-3 py-1.5 bg-[#1e1e1e] hover:bg-[#2d2d2d] hover:border-accent/50 border border-[#333] rounded-lg text-xs text-gray-300 transition-all flex-shrink-0 flex items-center gap-1.5 group">
-                        <span>{suggestion}</span><ChevronRight className="w-3 h-3 opacity-50 group-hover:translate-x-0.5 transition-transform" />
+        <div className="max-h-48 overflow-y-auto custom-scrollbar mb-3 space-y-3">
+            {!isLoading && (
+              <div className="animate-fade-in">
+                 <div className="flex items-center justify-between mb-2">
+                    <button onClick={() => setIsIdeasOpen(!isIdeasOpen)} className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider hover:text-gray-300 transition-colors">
+                       <Lightbulb className="w-3 h-3 text-yellow-500" />
+                       <span>Ideas</span>
+                       <ChevronDown className={`w-3.5 h-3.5 ml-1 transition-transform ${isIdeasOpen ? 'rotate-0' : '-rotate-90'}`} />
                     </button>
-                    ))}
-                </div>
-             )}
-          </div>
-        )}
+                    <button onClick={regenerateSuggestions} className="text-gray-500 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors" title="Get new ideas"><RefreshCw className="w-3 h-3" /></button>
+                 </div>
+                 {isIdeasOpen && (
+                    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 mask-linear-fade animate-fade-in">
+                        {suggestions.map((suggestion, idx) => (
+                        <button key={idx} onClick={() => handleSend(suggestion)} className="whitespace-nowrap px-3 py-1.5 bg-[#1e1e1e] hover:bg-[#2d2d2d] hover:border-accent/50 border border-[#333] rounded-lg text-xs text-gray-300 transition-all flex-shrink-0 flex items-center gap-1.5 group">
+                            <span>{suggestion}</span><ChevronRight className="w-3 h-3 opacity-50 group-hover:translate-x-0.5 transition-transform" />
+                        </button>
+                        ))}
+                    </div>
+                 )}
+              </div>
+            )}
 
-        {hasCheckpoint && (
-            <div className="mb-3 animate-fade-in border-t border-border pt-3">
-                <div className="flex items-center justify-between">
-                    <button onClick={() => setIsCheckpointOpen(!isCheckpointOpen)} className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider hover:text-gray-300 transition-colors flex-1 text-left">
-                        <History className="w-3 h-3 text-cyan-400" />
-                        <span>Checkpoint</span>
-                        <ChevronDown className={`w-3.5 h-3.5 ml-1 transition-transform ${isCheckpointOpen ? 'rotate-0' : '-rotate-90'}`} />
-                    </button>
-                    <Button variant="secondary" size="sm" onClick={onRestoreCheckpoint} className="h-7">
-                        Restore Project
-                    </Button>
+            {hasCheckpoint && (
+                <div className="animate-fade-in border-t border-border pt-3">
+                    <div className="flex items-center justify-between">
+                        <button onClick={() => setIsCheckpointOpen(!isCheckpointOpen)} className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider hover:text-gray-300 transition-colors flex-1 text-left">
+                            <History className="w-3 h-3 text-cyan-400" />
+                            <span>Checkpoint</span>
+                            <ChevronDown className={`w-3.5 h-3.5 ml-1 transition-transform ${isCheckpointOpen ? 'rotate-0' : '-rotate-90'}`} />
+                        </button>
+                        <Button variant="secondary" size="sm" onClick={onRestoreCheckpoint} className="h-7">
+                            Restore Project
+                        </Button>
+                    </div>
+                    {isCheckpointOpen && (
+                        <p className="text-xs text-gray-500 mt-1 pl-1 animate-fade-in">Revert all files to the state of your last checkpoint.</p>
+                    )}
                 </div>
-                {isCheckpointOpen && (
-                    <p className="text-xs text-gray-500 mt-1 pl-1 animate-fade-in">Revert all files to the state of your last checkpoint.</p>
+            )}
+            
+            <div className="animate-fade-in border-t border-border pt-3">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider" title="Use a more powerful model for complex tasks. May be slower.">
+                        <Cpu className="w-3 h-3 text-purple-400" /><span>Deep Think</span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            checked={isDeepThink}
+                            onChange={(e) => setIsDeepThink(e.target.checked)}
+                            className="sr-only peer" 
+                        />
+                        <div className="w-9 h-5 bg-gray-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
+                    </label>
+                </div>
+                 {isDeepThink && (
+                    <p className="text-xs text-gray-500 mt-1 pl-1">Uses Gemini 3 Pro for higher quality on complex tasks. Responses may be slower.</p>
                 )}
             </div>
-        )}
-        
-        <div className="mb-3 animate-fade-in border-t border-border pt-3">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider" title="Use a more powerful model for complex tasks. May be slower.">
-                    <Cpu className="w-3 h-3 text-purple-400" /><span>Deep Think</span>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                        type="checkbox" 
-                        checked={isDeepThink}
-                        onChange={(e) => setIsDeepThink(e.target.checked)}
-                        className="sr-only peer" 
-                    />
-                    <div className="w-9 h-5 bg-gray-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
-                </label>
-            </div>
-             {isDeepThink && (
-                <p className="text-xs text-gray-500 mt-1 pl-1">Uses Gemini 3 Pro for higher quality on complex tasks. Responses may be slower.</p>
-            )}
         </div>
-
+        
         <div className="relative group bg-[#1e1e1e] border border-[#333] focus-within:border-accent rounded-xl shadow-inner transition-all duration-200">
           {attachments.length > 0 && (
             <div className="p-2 border-b border-[#333]">

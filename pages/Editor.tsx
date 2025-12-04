@@ -551,8 +551,8 @@ const Editor: React.FC = () => {
                 <button onClick={() => toggleSidebar('search')} className={`w-12 h-12 flex items-center justify-center relative ${sidebarView === 'search' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Search"><Search className="w-6 h-6 stroke-[1.5]" />{sidebarView === 'search' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
                 <button onClick={() => toggleSidebar('ai')} className={`w-12 h-12 flex items-center justify-center relative ${sidebarView === 'ai' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="AI Assistant"><Sparkles className="w-6 h-6 stroke-[1.5]" />{sidebarView === 'ai' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
               </div>
-              <div className={`transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-72' : 'w-0'} overflow-hidden`}>
-                  <div className="w-72 h-full bg-sidebar border-r border-border flex flex-col shrink-0">
+              <div className={`transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-64 lg:w-72' : 'w-0'} overflow-hidden`}>
+                  <div className="w-64 lg:w-72 h-full bg-sidebar border-r border-border flex flex-col shrink-0">
                       {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={handleFileSelect} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} />}
                       {sidebarView === 'ai' && <AIChat files={project.files} activeFile={activeFile} messages={chatMessages} onSendMessage={handleSendMessage} onRegenerate={handleRegenerate} onClose={() => setIsSidebarOpen(false)} hasCheckpoint={!!checkpoint} onCreateCheckpoint={handleCreateCheckpoint} onRestoreCheckpoint={handleRestoreCheckpoint} />}
                       {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-8 h-8 mx-auto mb-2 opacity-50" />Global search coming soon</div>}
@@ -574,7 +574,7 @@ const Editor: React.FC = () => {
           </div>
 
           {((!isMobile && showPreview) || (isMobile && mobileTab === 'preview')) && (
-            <div className={`bg-sidebar border-l border-border h-full flex flex-col transition-colors duration-300 ${isMobile ? 'w-full absolute inset-0 z-10' : 'w-[40%] shrink-0 relative'}`}>
+            <div className={`bg-sidebar border-l border-border h-full flex flex-col transition-colors duration-300 ${isMobile ? 'w-full absolute inset-0 z-10' : 'md:w-2/5 lg:w-1/3 shrink-0 relative'}`}>
               {isMobile && <div className="h-10 flex items-center justify-between px-2 bg-[#1e1e1e] border-b border-[#333] shrink-0"><span className="text-xs font-bold text-gray-400 uppercase">Preview</span><button onClick={() => setMobileTab('editor')}><X className="w-4 h-4 text-gray-400"/></button></div>}
               <Preview files={project.files} refreshTrigger={refreshTrigger} />
             </div>
