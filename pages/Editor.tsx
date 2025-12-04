@@ -1,52 +1,26 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { projectService } from '../services/projectService';
-import { Project, File as ProjectFile, PanelType, ChatMessage } from '../types';
+import { Project, File as ProjectFile, PanelType, ChatMessage, ChatSession, Checkpoint } from '../types';
 import { CodeEditor } from '../components/editor/CodeEditor';
 import { Preview } from '../components/editor/Preview';
 import { AIChat } from '../components/editor/AIChat';
 import { Button } from '../components/ui/Button';
 import { SettingsModal } from '../components/dashboard/SettingsModal';
 import { FileExplorer } from '../components/editor/FileExplorer';
-import { chatService } from '../services/chatService';
 import { generateCodeStream } from '../services/geminiService';
 import { SEO } from '../components/ui/SEO';
+import { CheckpointModal } from '../components/editor/CheckpointModal';
 import { 
   Menu, Save, ArrowLeft, Layout, MessageSquare, Play, Download, 
-  Loader2, Cloud, Settings, Files, Search, Sparkles, X, LayoutTemplate
+  Loader2, Cloud, Settings, Files, Search, Sparkles, X, LayoutTemplate,
+  AlertTriangle, Check, CloudOff, AlertCircle
 } from 'lucide-react';
 import JSZip from 'jszip';
+import { ActionModal } from '../components/dashboard/ActionModal';
 
 type SidebarView = 'files' | 'ai' | 'search';
-
-// Helper functions moved from AIChat
-const sanitizeJson = (str: string) => {
-  let result = '';
-  let inString = false;
-  let isEscaped = false;
-  
-  for (let i = 0; i < str.length; i++) {
-    const char = str[i];
-    if (char === '"' && !isEscaped) {
-      inString = !inString;
-      result += char;
-    } else if (inString) {
-      if (char === '\\') {
-         isEscaped = !isEscaped;
-         result += char;
-      } else {
-         isEscaped = false;
-         if (char === '\n') result += '\\n';
-         else if (char === '\r') { }
-         else if (char === '\t') result += '\\t';
-         else result += char;
-      }
-    } else {
-      result += char;
-    }
-  }
-  return result;
-};
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 const Editor: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -55,8 +29,11 @@ const Editor: React.FC = () => {
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCheckpointModalOpen, setIsCheckpointModalOpen] = useState(false);
   
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -65,95 +42,86 @@ const Editor: React.FC = () => {
   const [mobileTab, setMobileTab] = useState<PanelType>('editor');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [highlightedFiles, setHighlightedFiles] = useState<Set<string>>(new Set());
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [checkpoint, setCheckpoint] = useState<Record<string, ProjectFile> | null>(null);
+  
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+  const [isCreateCheckpointModalOpen, setIsCreateCheckpointModalOpen] = useState(false);
+  
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Smarter resize handler to fix mobile keyboard issue
   useEffect(() => {
     const handleResize = () => {
       const newIsMobile = window.innerWidth < 768;
-      
-      setIsMobile(prevIsMobile => {
-        // If the mobile status hasn't changed, do nothing.
-        // This is the key fix: it prevents the keyboard from closing the sidebar.
-        if (prevIsMobile === newIsMobile) {
-          return prevIsMobile;
-        }
-
-        // If we are transitioning between mobile and desktop, adjust sidebar visibility.
-        // Moving to Desktop (!newIsMobile) -> open sidebar.
-        // Moving to Mobile (newIsMobile) -> close sidebar.
-        setIsSidebarOpen(!newIsMobile);
-        
-        return newIsMobile;
-      });
+      setIsMobile(newIsMobile);
+      setIsSidebarOpen(!newIsMobile);
     };
-
-    // Set initial state correctly
-    const initialIsMobile = window.innerWidth < 768;
-    setIsMobile(initialIsMobile);
-    setIsSidebarOpen(!initialIsMobile);
-
     window.addEventListener('resize', handleResize);
+    handleResize();
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Project and Chat History Loading
-  useEffect(() => {
-    const loadProject = async () => {
-      if (projectId) {
-        try {
-          const p = await projectService.getProject(projectId);
-          if (p) {
-            setProject(p);
-            const initialFile = p.files['/index.html'] ? '/index.html' : Object.keys(p.files)[0];
-            if (initialFile) {
-              handleFileSelect(initialFile);
-            }
-            const chatHistory = chatService.getChatHistory(projectId);
-            setChatMessages(chatHistory);
-            
-            // Load checkpoint
-            const savedCheckpoint = localStorage.getItem(`webbench_checkpoint_${projectId}`);
-            if (savedCheckpoint) setCheckpoint(JSON.parse(savedCheckpoint));
-
-          } else { navigate('/dashboard'); }
-        } catch (error) {
-          console.error("Error loading project", error);
-          navigate('/dashboard');
-        } finally { setLoading(false); }
+  const loadInitialData = useCallback(async () => {
+    if (!projectId) {
+      setLoadError("Project ID is missing.");
+      setLoading(false);
+      return;
+    }
+    try {
+      const p = await projectService.getProject(projectId);
+      if (!p) {
+        setLoadError("Project not found.");
+        return;
       }
-    };
-    loadProject();
-  }, [projectId, navigate]);
-  
-  // Auto-save logic
+      setProject(p);
+      const initialFile = p.files['/index.html'] ? '/index.html' : Object.keys(p.files)[0];
+      if (initialFile) handleFileSelect(initialFile);
+
+      const [loadedSessions, loadedCheckpoints] = await Promise.all([
+        projectService.getChatSessions(projectId),
+        projectService.getCheckpointsForProject(projectId),
+      ]);
+      
+      setCheckpoints(loadedCheckpoints);
+
+      if (loadedSessions.length > 0) {
+        setChatSessions(loadedSessions);
+        setActiveSessionId(loadedSessions[0].id);
+      } else {
+        // Create a default session if none exist
+        await handleCreateSession(projectId);
+      }
+
+    } catch (error: any) {
+      console.error("Error loading project data", error);
+      setLoadError(error.message || "An unknown error occurred while loading the project.");
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
   useEffect(() => {
-    if (loading) return;
+    loadInitialData();
+  }, [loadInitialData]);
+  
+  useEffect(() => {
+    if (loading || saveStatus === 'saving') return;
     const timeout = setTimeout(() => {
       forceSave(false);
     }, 2000);
     return () => clearTimeout(timeout);
   }, [project, loading]);
 
-  // Persist chat history
-  useEffect(() => {
-    if (projectId && !loading) {
-      chatService.saveChatHistory(projectId, chatMessages);
+  const handleCreateSession = async (pId = projectId) => {
+    if (!pId) return;
+    try {
+      const newSession = await projectService.createChatSession(pId, `Chat ${chatSessions.length + 1}`);
+      setChatSessions(prev => [newSession, ...prev]);
+      setActiveSessionId(newSession.id);
+    } catch(e: any) {
+      setActionError(e.message);
     }
-  }, [chatMessages, projectId, loading]);
-
-  // Persist checkpoint
-  useEffect(() => {
-    if (projectId) {
-      const key = `webbench_checkpoint_${projectId}`;
-      if (checkpoint) {
-        localStorage.setItem(key, JSON.stringify(checkpoint));
-      } else {
-        localStorage.removeItem(key);
-      }
-    }
-  }, [checkpoint, projectId]);
+  };
 
   const toggleSidebar = (view: SidebarView) => {
     if (isSidebarOpen && sidebarView === view) {
@@ -195,11 +163,18 @@ const Editor: React.FC = () => {
   };
 
   const forceSave = async (withRefresh = true) => {
-    if (project && projectId && !isSaving) {
-      setIsSaving(true);
-      await projectService.updateProject(projectId, { files: project.files });
-      if (withRefresh) setRefreshTrigger(prev => prev + 1);
-      setTimeout(() => setIsSaving(false), 1000);
+    if (project && projectId && saveStatus !== 'saving') {
+      setSaveStatus('saving');
+      try {
+        await projectService.updateProject(projectId, { files: project.files });
+        if (withRefresh) setRefreshTrigger(prev => prev + 1);
+        setSaveStatus('saved');
+      } catch (error) {
+        console.error("Save error:", error);
+        setSaveStatus('error');
+      } finally {
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      }
     }
   };
 
@@ -214,7 +189,7 @@ const Editor: React.FC = () => {
     const url = window.URL.createObjectURL(content);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `[ ${project.name} ]_WebBench.zip`;
+    a.download = `${project.name}-WebBench.zip`;
     a.click();
     window.URL.revokeObjectURL(url);
   };
@@ -259,43 +234,64 @@ const Editor: React.FC = () => {
     return Promise.resolve(changedPaths);
   };
 
- const streamAndApplyResponse = async (prompt: string, attachments: any[], aiMsgId: string, isDeepThink: boolean) => {
+  const updateMessageInState = (sessionId: string, message: ChatMessage) => {
+    setChatSessions(prevSessions =>
+      prevSessions.map(session => {
+        if (session.id === sessionId) {
+          const existingMsgIndex = session.messages.findIndex(m => m.clientId === message.clientId);
+          let newMessages;
+          if (existingMsgIndex > -1) {
+            newMessages = session.messages.map(m => m.clientId === message.clientId ? message : m);
+          } else {
+            newMessages = [...session.messages, message];
+          }
+          return { ...session, messages: newMessages };
+        }
+        return session;
+      })
+    );
+  };
+
+  const streamAndApplyResponse = async (prompt: string, attachments: any[], aiMsg: ChatMessage, model: string) => {
     if (!project) return;
+    
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+
     try {
-      const modelName = isDeepThink ? 'gemini-3-pro-preview' : 'gemini-2.5-flash';
-      const streamResponse = await generateCodeStream(
-        prompt, 
-        project.files, 
-        activeFile, 
-        attachments.map(a => ({ mimeType: a.mimeType, data: a.data })),
-        modelName,
-        isDeepThink
-      );
+      const streamResponse = await generateCodeStream( prompt, project.files, activeFile, attachments, model, signal );
       let fullText = '';
       const completedFileBlocksRegex = /```(\w+)\s*\n(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)[\s\S]*?\n```/g;
+      let sources = new Map<string, string>();
       
       for await (const chunk of streamResponse) {
+        if (signal.aborted) throw new Error("Cancelled by user.");
+
         fullText += chunk.text || "";
 
+        const groundingChunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        if (groundingChunks) {
+          for (const g_chunk of groundingChunks) {
+            if (g_chunk.web) {
+              sources.set(g_chunk.web.uri, g_chunk.web.title || g_chunk.web.uri);
+            }
+          }
+        }
+        
         const jsonBlockStarted = fullText.includes('```json');
         const conversationalPart = jsonBlockStarted ? fullText.substring(0, fullText.indexOf('```json')) : fullText;
-        
         const completedFiles = [...conversationalPart.matchAll(completedFileBlocksRegex)].map(match => match[2]);
-
         let liveStreamData: ChatMessage['liveStream'] | undefined = undefined;
         let contentForMarkdown = conversationalPart;
-
         const lastOpeningFenceMatch = [...conversationalPart.matchAll(/```(\w*)\s*\n/g)].pop();
 
         if (lastOpeningFenceMatch) {
             const lastOpeningFenceIndex = lastOpeningFenceMatch.index!;
             const contentAfterLastOpen = conversationalPart.substring(lastOpeningFenceIndex);
-
             if (!contentAfterLastOpen.substring(lastOpeningFenceMatch[0].length).includes('```')) {
                 const language = lastOpeningFenceMatch[1] || 'plaintext';
                 const codeContent = contentAfterLastOpen.substring(lastOpeningFenceMatch[0].length);
                 const pathMatch = codeContent.match(/^(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)/);
-
                 if (pathMatch && language.toLowerCase() !== 'json') {
                     liveStreamData = {
                         currentFile: pathMatch[1],
@@ -307,109 +303,184 @@ const Editor: React.FC = () => {
             }
         }
         
-        setChatMessages(prev => prev.map(msg => 
-            msg.id === aiMsgId 
-            ? { ...msg, 
-                content: contentForMarkdown,
-                liveStream: jsonBlockStarted ? undefined : liveStreamData,
-                completedFiles: completedFiles,
-                isApplyingChanges: jsonBlockStarted,
-                isLoading: true,
-              }
-            : msg
-        ));
+        const updatedMsg: Partial<ChatMessage> = { 
+            content: contentForMarkdown,
+            liveStream: jsonBlockStarted ? undefined : liveStreamData,
+            completedFiles: completedFiles,
+            isApplyingChanges: jsonBlockStarted,
+            isLoading: true,
+          };
+        updateMessageInState(aiMsg.session_id, { ...aiMsg, ...updatedMsg });
       }
 
       const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/;
       const jsonMatch = fullText.match(jsonBlockRegex);
       const finalContent = fullText.replace(jsonBlockRegex, '').trim();
+      const finalSources = Array.from(sources, ([uri, title]) => ({ uri, title }));
 
+      const finalAiMessageUpdate = async (update: Partial<ChatMessage>) => {
+        let finalMessage = { ...aiMsg, isLoading: false, liveStream: undefined, isApplyingChanges: false, sources: finalSources, ...update };
+        const savedMessage = await projectService.saveChatMessage(finalMessage);
+        updateMessageInState(aiMsg.session_id, { ...finalMessage, ...savedMessage });
+      };
+      
       if (jsonMatch && jsonMatch[1]) {
         try {
-          const response = JSON.parse(sanitizeJson(jsonMatch[1]));
-          
+          const response = JSON.parse(jsonMatch[1]);
           if (response.files && Array.isArray(response.files) && response.files.length > 0) {
             const changedPaths = await handleAIChanges(response.files);
             const successMsg = `\n\n✨ **Changes Applied Successfully!**`;
-            setChatMessages(prev => prev.map(msg => msg.id === aiMsgId ? { ...msg, content: finalContent + successMsg, isLoading: false, liveStream: undefined, isApplyingChanges: false, completedFiles: changedPaths } : msg));
+            await finalAiMessageUpdate({ content: finalContent + successMsg, completedFiles: changedPaths });
           } else {
-             const generatedFiles = [...finalContent.matchAll(completedFileBlocksRegex)].map(match => match[2]);
-            setChatMessages(prev => prev.map(msg => msg.id === aiMsgId ? { ...msg, content: finalContent, isLoading: false, liveStream: undefined, isApplyingChanges: false, completedFiles: generatedFiles } : msg));
+            const generatedFiles = [...finalContent.matchAll(completedFileBlocksRegex)].map(match => match[2]);
+            await finalAiMessageUpdate({ content: finalContent, completedFiles: generatedFiles });
           }
-        } catch (e) {
-          console.error("Failed to parse AI JSON response", e);
-          const errorContent = "Sorry, I couldn't process the file changes. Here's my explanation:\n" + finalContent;
-          setChatMessages(prev => prev.map(msg => msg.id === aiMsgId ? { ...msg, content: errorContent, isLoading: false, liveStream: undefined, isApplyingChanges: false } : msg));
+        } catch (e: any) {
+          console.error("Failed to parse AI JSON response", e, "Raw JSON:", jsonMatch[1]);
+          const errorContent = `Sorry, I couldn't process the file changes due to a formatting error in my response. Here's my explanation:\n\n${finalContent}\n\n\`\`\`json\n${jsonMatch[1]}\n\`\`\``;
+          await finalAiMessageUpdate({ content: errorContent, isError: true });
         }
       } else {
         const generatedFiles = [...finalContent.matchAll(completedFileBlocksRegex)].map(match => match[2]);
-        setChatMessages(prev => prev.map(msg => msg.id === aiMsgId ? { ...msg, content: finalContent, isLoading: false, liveStream: undefined, completedFiles: generatedFiles } : msg));
+        await finalAiMessageUpdate({ content: finalContent, completedFiles: generatedFiles });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Chat error:", error);
-      setChatMessages(prev => prev.map(msg => msg.id === aiMsgId ? { ...msg, content: "Sorry, I encountered an error processing your request.", isLoading: false, liveStream: undefined } : msg));
+      const errorContent = signal.aborted ? "Generation cancelled." : `Sorry, I encountered an error: ${error.message}`;
+      const finalMessage = { ...aiMsg, content: errorContent, isLoading: false, liveStream: undefined, isError: true };
+      const savedMessage = await projectService.saveChatMessage(finalMessage);
+      updateMessageInState(aiMsg.session_id, { ...finalMessage, ...savedMessage });
+    } finally {
+        abortControllerRef.current = null;
     }
   };
-
-  const handleSendMessage = async (prompt: string, attachments: any[], isDeepThink: boolean) => {
+  
+  const handleSendMessage = async (prompt: string, attachments: any[], model: string, sessionId: string) => {
     const userMsg: ChatMessage = {
-      id: Date.now().toString(),
+      clientId: Date.now().toString(),
+      session_id: sessionId,
       role: 'user',
       content: prompt,
       timestamp: Date.now(),
       attachments: attachments.map(a => ({ name: a.name, type: a.type, dataUrl: a.dataUrl })),
-      isDeepThink: isDeepThink,
+      model,
     };
 
-    const aiMsgId = (Date.now() + 1).toString();
-    const aiMsg: ChatMessage = { id: aiMsgId, role: 'assistant', content: '', timestamp: Date.now(), isLoading: true, liveStream: undefined, isDeepThink };
+    const aiMsg: ChatMessage = { 
+        clientId: (Date.now() + 1).toString(), 
+        session_id: sessionId, 
+        role: 'assistant', content: '', timestamp: Date.now(), isLoading: true, liveStream: undefined, model 
+    };
+    
+    setChatSessions(prev => prev.map(s => s.id === sessionId ? { ...s, messages: [...s.messages, userMsg, aiMsg] } : s));
 
-    setChatMessages(prev => [...prev, userMsg, aiMsg]);
-    await streamAndApplyResponse(prompt, attachments, aiMsgId, isDeepThink);
+    const savedUserMsg = await projectService.saveChatMessage(userMsg);
+    updateMessageInState(sessionId, {...userMsg, ...savedUserMsg});
+
+    const attachmentData = attachments.map(a => ({ mimeType: a.mimeType, data: a.dataUrl.split(',')[1] }));
+    await streamAndApplyResponse(prompt, attachmentData, aiMsg, model);
   };
 
-  const handleRegenerate = async () => {
-    const lastUserMessage = [...chatMessages].reverse().find(m => m.role === 'user');
+  const handleRegenerate = async (sessionId: string) => {
+    const session = chatSessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    const lastUserMessage = [...session.messages].reverse().find(m => m.role === 'user');
     if (!lastUserMessage) return;
 
-    const lastUserMessageIndex = chatMessages.findLastIndex(m => m.role === 'user');
-    const aiMsgId = (Date.now() + 1).toString();
-    const isDeepThink = lastUserMessage.isDeepThink || false;
-    const aiMsg: ChatMessage = { id: aiMsgId, role: 'assistant', content: '', timestamp: Date.now(), isLoading: true, liveStream: undefined, isDeepThink };
+    const lastUserMessageIndex = session.messages.findLastIndex(m => m.role === 'user');
+    
+    const model = lastUserMessage.model || 'gemini-2.5-flash';
+    const aiMsg: ChatMessage = { clientId: (Date.now() + 1).toString(), session_id: sessionId, role: 'assistant', content: '', timestamp: Date.now(), isLoading: true, model };
 
-    setChatMessages(prev => [...prev.slice(0, lastUserMessageIndex + 1), aiMsg]);
+    setChatSessions(prev => prev.map(s => s.id === sessionId ? { ...s, messages: [...s.messages.slice(0, lastUserMessageIndex + 1), aiMsg] } : s));
 
     const attachments = lastUserMessage.attachments?.map(att => ({
-        name: att.name, type: att.type, mimeType: att.type, dataUrl: att.dataUrl, data: att.dataUrl.split(',')[1],
+        mimeType: att.type, data: att.dataUrl.split(',')[1],
     })) || [];
     
-    await streamAndApplyResponse(lastUserMessage.content, attachments, aiMsgId, isDeepThink);
+    await streamAndApplyResponse(lastUserMessage.content, attachments, aiMsg, model);
   };
-
-  const handleCreateCheckpoint = () => {
-    if (project) {
-      setCheckpoint(project.files);
-      const checkpointMsg: ChatMessage = {
-        id: Date.now().toString(),
-        role: 'system',
-        content: '✅ Checkpoint created. You can restore your project to this point.',
-        timestamp: Date.now(),
-      };
-      setChatMessages(prev => [...prev, checkpointMsg]);
+  
+  const handleCancelGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
   };
 
-  const handleRestoreCheckpoint = () => {
-    if (project && checkpoint) {
-      setProject({ ...project, files: checkpoint });
+  const handleCreateCheckpoint = async (name: string) => {
+    if (project && projectId) {
+      try {
+        const newCheckpoint = await projectService.createCheckpoint(projectId, name, project.files);
+        setCheckpoints(prev => [newCheckpoint, ...prev]);
+        const systemMsg: ChatMessage = {
+          clientId: Date.now().toString(),
+          session_id: activeSessionId!,
+          role: 'system',
+          content: `✅ Checkpoint "${name}" created.`,
+          timestamp: Date.now(),
+        };
+        setChatSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: [...s.messages, systemMsg] } : s));
+        await projectService.saveChatMessage(systemMsg);
+      } catch (e: any) {
+        setActionError(e.message);
+      }
+    }
+  };
+  
+  const handleRestoreCheckpoint = (checkpoint: Checkpoint) => {
+    if (project) {
+      setProject({ ...project, files: checkpoint.files });
       setRefreshTrigger(p => p + 1);
-      const restoreMsg: ChatMessage = {
-        id: Date.now().toString(),
+      const systemMsg: ChatMessage = {
+        clientId: Date.now().toString(),
+        session_id: activeSessionId!,
         role: 'system',
-        content: '⏪ Project restored to the last checkpoint.',
+        content: `⏪ Project restored to checkpoint "${checkpoint.name}".`,
         timestamp: Date.now(),
       };
-      setChatMessages(prev => [...prev, restoreMsg]);
+      setChatSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: [...s.messages, systemMsg] } : s));
+      projectService.saveChatMessage(systemMsg);
+    }
+  };
+
+  const handleDeleteCheckpoint = async (checkpointId: string) => {
+    try {
+      await projectService.deleteCheckpoint(checkpointId);
+      setCheckpoints(prev => prev.filter(c => c.id !== checkpointId));
+    } catch (e: any) {
+      setActionError(e.message);
+    }
+  };
+
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!activeSessionId) return;
+    try {
+      await projectService.deleteChatMessage(messageId);
+      setChatSessions(prev => prev.map(s => 
+        s.id === activeSessionId 
+          ? { ...s, messages: s.messages.filter(m => m.id !== messageId) }
+          : s
+      ));
+    } catch (error: any) {
+      setActionError(error.message);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    if (chatSessions.length <= 1) {
+      setActionError("Cannot delete the last chat session.");
+      return;
+    }
+    try {
+      await projectService.deleteChatSession(sessionId);
+      const remainingSessions = chatSessions.filter(s => s.id !== sessionId);
+      setChatSessions(remainingSessions);
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(remainingSessions[0]?.id || null);
+      }
+    } catch (error: any) {
+      setActionError(error.message);
     }
   };
 
@@ -424,12 +495,12 @@ const Editor: React.FC = () => {
 
     const updatedFiles = { ...project.files };
     if (isFolder) {
-      updatedFiles[fullPath] = { path: fullPath, name: '.keep', content: '', type: 'plaintext', lastModified: Date.now() };
+      updatedFiles[fullPath] = { path: fullPath, name: '.keep', content: '', type: 'markdown', lastModified: Date.now() };
     } else {
       const name = path.split('/').pop() || 'new-file';
       const ext = name.split('.').pop();
-      let type: any = 'plaintext';
-      if(ext === 'html') type = 'html'; else if(ext === 'css') type = 'css'; else if(ext === 'js') type = 'javascript'; else if(ext === 'json') type = 'json';
+      let type: any = 'html';
+      if(ext === 'css') type = 'css'; else if(ext === 'js') type = 'javascript'; else if(ext === 'json') type = 'json';
       updatedFiles[path] = { path, name, content: '', type, lastModified: Date.now() };
       handleFileSelect(path);
     }
@@ -492,8 +563,32 @@ const Editor: React.FC = () => {
     setProject({ ...project, files: updatedFiles });
     handleFileSelect(newPath);
   };
+  
+  const renderSaveStatus = () => {
+    switch(saveStatus) {
+      case 'saving': return <Loader2 className="w-4 h-4 animate-spin text-yellow-500" title="Saving..." />;
+      case 'saved': return <Check className="w-4 h-4 text-green-500" title="Saved successfully!" />;
+      case 'error': return <CloudOff className="w-4 h-4 text-red-500" title="Save failed!" />;
+      case 'idle':
+      default:
+        return <Cloud className="w-4 h-4 text-gray-500" title="Changes saved" />;
+    }
+  };
 
-  if (loading || !project) return <div className="h-screen flex items-center justify-center bg-background text-white"><Loader2 className="animate-spin w-8 h-8"/></div>;
+  if (loading) return <div className="h-screen flex items-center justify-center bg-background text-white"><Loader2 className="animate-spin w-8 h-8"/></div>;
+
+  if (loadError) return (
+    <div className="h-screen flex flex-col items-center justify-center bg-background text-red-400 p-4">
+      <AlertTriangle className="w-12 h-12 mb-4"/>
+      <h2 className="text-xl font-bold text-white">Failed to Load Project</h2>
+      <p className="text-gray-400 mt-2 text-center">{loadError}</p>
+      <Button onClick={() => navigate('/dashboard')} className="mt-6">
+        Back to Dashboard
+      </Button>
+    </div>
+  );
+  
+  if (!project) return null;
 
   return (
     <>
@@ -502,8 +597,29 @@ const Editor: React.FC = () => {
         description={`Live-edit ${project.name} with an integrated AI assistant, real-time preview, and a VS Code-like experience, all in your browser.`}
         keywords="code editor, AI coding assistant, live preview, web development IDE, WebBench"
       />
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      {isCheckpointModalOpen && (
+        <CheckpointModal 
+          isOpen={isCheckpointModalOpen}
+          onClose={() => setIsCheckpointModalOpen(false)}
+          checkpoints={checkpoints}
+          onRestore={handleRestoreCheckpoint}
+          onDelete={handleDeleteCheckpoint}
+          onCreate={() => setIsCreateCheckpointModalOpen(true)}
+        />
+      )}
+      {isCreateCheckpointModalOpen && (
+        <ActionModal
+          isOpen={true}
+          config={{ type: 'createCheckpoint', project }}
+          onClose={() => setIsCreateCheckpointModalOpen(false)}
+          onConfirm={async (_, value) => {
+            if (value) await handleCreateCheckpoint(value);
+            setIsCreateCheckpointModalOpen(false);
+          }}
+        />
+      )}
       <div className="h-screen flex flex-col bg-background text-gray-300 overflow-hidden transition-colors duration-300">
-        <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
         <header className="h-10 bg-[#1e1e1e] border-b border-[#2b2b2b] flex items-center justify-between px-3 z-20 shrink-0 select-none">
           <div className="flex items-center gap-3">
             {isMobile && (
@@ -523,7 +639,7 @@ const Editor: React.FC = () => {
                 </button>
               )}
               <span className="font-medium text-sm text-gray-200 truncate max-w-[150px] sm:max-w-[200px]">{project.name}</span>
-              {isSaving ? <Loader2 className="w-3 h-3 animate-spin text-yellow-500 opacity-70"/> : <Cloud className="w-3 h-3 text-gray-500 opacity-50"/>}
+              <div className="w-4 h-4 flex items-center justify-center">{renderSaveStatus()}</div>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -545,6 +661,15 @@ const Editor: React.FC = () => {
         </header>
 
         <main className="flex-1 flex overflow-hidden relative">
+          {actionError && (
+             <div className="absolute top-4 right-4 z-[101] p-4 max-w-sm bg-red-500/20 border border-red-500/30 rounded-lg flex items-start gap-3 text-red-300 text-sm animate-fade-in shadow-2xl">
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-400" />
+              <span>{actionError}</span>
+              <button onClick={() => setActionError(null)} className="ml-auto p-1 rounded-full hover:bg-white/10">
+                <X className="w-4 h-4"/>
+              </button>
+            </div>
+          )}
           <div className="flex shrink-0">
               <div className={`w-12 bg-[#252526] border-r border-[#2b2b2b] flex-col items-center py-2 shrink-0 z-30 ${isMobile ? 'hidden' : 'flex'}`}>
                 <button onClick={() => toggleSidebar('files')} className={`w-12 h-12 flex items-center justify-center relative ${sidebarView === 'files' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Explorer"><Files className="w-6 h-6 stroke-[1.5]" />{sidebarView === 'files' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
@@ -554,7 +679,7 @@ const Editor: React.FC = () => {
               <div className={`transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-64 lg:w-72' : 'w-0'} overflow-hidden`}>
                   <div className="w-64 lg:w-72 h-full bg-sidebar border-r border-border flex flex-col shrink-0">
                       {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={handleFileSelect} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} />}
-                      {sidebarView === 'ai' && <AIChat files={project.files} activeFile={activeFile} messages={chatMessages} onSendMessage={handleSendMessage} onRegenerate={handleRegenerate} onClose={() => setIsSidebarOpen(false)} hasCheckpoint={!!checkpoint} onCreateCheckpoint={handleCreateCheckpoint} onRestoreCheckpoint={handleRestoreCheckpoint} />}
+                      {sidebarView === 'ai' && <AIChat files={project.files} sessions={chatSessions} activeSessionId={activeSessionId} onSendMessage={handleSendMessage} onRegenerate={handleRegenerate} onClose={() => setIsSidebarOpen(false)} onOpenCheckpoints={() => setIsCheckpointModalOpen(true)} onCreateSession={handleCreateSession} onSwitchSession={setActiveSessionId} onCancel={handleCancelGeneration} onDeleteMessage={handleDeleteMessage} onDeleteSession={handleDeleteSession} />}
                       {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-8 h-8 mx-auto mb-2 opacity-50" />Global search coming soon</div>}
                   </div>
               </div>
@@ -567,7 +692,7 @@ const Editor: React.FC = () => {
           )}
           {isMobile && isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="absolute inset-0 bg-black/50 z-30 animate-in fade-in duration-300"></div>}
           
-          {isMobile && mobileTab === 'ai' && <div className="absolute inset-0 z-20 bg-sidebar flex flex-col"><AIChat files={project.files} activeFile={activeFile} messages={chatMessages} onSendMessage={handleSendMessage} onRegenerate={handleRegenerate} onClose={() => setMobileTab('editor')} hasCheckpoint={!!checkpoint} onCreateCheckpoint={handleCreateCheckpoint} onRestoreCheckpoint={handleRestoreCheckpoint} /></div>}
+          {isMobile && mobileTab === 'ai' && <div className="absolute inset-0 z-20 bg-sidebar flex flex-col"><AIChat files={project.files} sessions={chatSessions} activeSessionId={activeSessionId} onSendMessage={handleSendMessage} onRegenerate={handleRegenerate} onClose={() => setMobileTab('editor')} onOpenCheckpoints={() => setIsCheckpointModalOpen(true)} onCreateSession={handleCreateSession} onSwitchSession={setActiveSessionId} onCancel={handleCancelGeneration} onDeleteMessage={handleDeleteMessage} onDeleteSession={handleDeleteSession} /></div>}
 
           <div className={`bg-background h-full flex flex-col min-w-0 ${isMobile ? (mobileTab === 'editor' ? 'flex flex-1 w-full' : 'hidden') : 'flex-1 relative'}`}>
             <CodeEditor files={project.files} activeFile={activeFile} openFiles={openFiles} onChange={handleFileChange} onCloseFile={handleCloseFile} onSelectFile={handleFileSelect} isMobile={isMobile} />
