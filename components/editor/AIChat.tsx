@@ -269,6 +269,7 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({ message: msg, onCont
         prev.content === next.content &&
         prev.isLoading === next.isLoading &&
         prev.isError === next.isError &&
+        prev.analysisText === next.analysisText &&
         prev.isApplyingChanges === next.isApplyingChanges &&
         prev.liveStream?.currentCode === next.liveStream?.currentCode &&
         prev.liveStream?.currentFile === next.liveStream?.currentFile &&

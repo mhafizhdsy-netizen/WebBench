@@ -4,7 +4,7 @@ import { Button } from '../ui/Button';
 import { 
   Folder, FolderOpen, FileCode, FileJson, FileType, ChevronRight, ChevronDown, 
   FilePlus, FolderPlus, Trash2, Edit2, Copy, X, Loader2, Search,
-  FileImage, FileText
+  FileImage, FileText, MoreVertical
 } from 'lucide-react';
 
 // --- Helper Components ---
@@ -162,6 +162,13 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
   const [draggedPath, setDraggedPath] = useState<string | null>(null);
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   
+  const dragStateRef = useRef({
+      isDragging: false,
+      draggedPath: null as string | null,
+      startX: 0,
+      startY: 0
+  });
+  
   useEffect(() => {
     if (activeFile && !searchQuery) {
         const parts = activeFile.split('/').filter(Boolean);
@@ -249,7 +256,8 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
   const openContextMenu = (e: React.MouseEvent, path: string, isFolder: boolean) => {
     e.preventDefault();
     e.stopPropagation();
-    setContextMenu({ x: e.clientX, y: e.clientY, path, isFolder });
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setContextMenu({ x: rect.left, y: rect.bottom + 4, path, isFolder });
   };
   
   const fileTree = useMemo(() => {
@@ -384,6 +392,76 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
     }
     handleDragEnd();
   };
+  
+    // --- Touch Drag and Drop Handlers ---
+    const handleTouchMove = (e: TouchEvent) => {
+        if (!dragStateRef.current.draggedPath) return;
+
+        const touch = e.touches[0];
+        const dx = Math.abs(touch.clientX - dragStateRef.current.startX);
+        const dy = Math.abs(touch.clientY - dragStateRef.current.startY);
+
+        if (!dragStateRef.current.isDragging && (dx > 10 || dy > 10)) {
+            dragStateRef.current.isDragging = true;
+            setDraggedPath(dragStateRef.current.draggedPath);
+        }
+
+        if (dragStateRef.current.isDragging) {
+            e.preventDefault();
+            const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+            let droppableElement = targetElement;
+            while(droppableElement && !droppableElement.getAttribute('data-droppable')) {
+                droppableElement = droppableElement.parentElement;
+            }
+
+            if (droppableElement) {
+                const path = droppableElement.getAttribute('data-path');
+                const draggedP = dragStateRef.current.draggedPath;
+                if (path && draggedP && path !== draggedP && !path.startsWith(draggedP + '/')) {
+                    setDragOverPath(path);
+                } else {
+                    setDragOverPath(null);
+                }
+            } else {
+                setDragOverPath(null);
+            }
+        }
+    };
+
+    const handleTouchEnd = () => {
+        if (dragStateRef.current.isDragging && draggedPath && dragOverPath) {
+            const sourceName = draggedPath.split('/').pop();
+            if (sourceName) {
+                const newPath = dragOverPath === '/' ? `/${sourceName}` : `${dragOverPath}/${sourceName}`;
+                if (newPath !== draggedPath) {
+                    onRename(draggedPath, newPath);
+                }
+            }
+        }
+        
+        window.removeEventListener('touchmove', handleTouchMove);
+        window.removeEventListener('touchend', handleTouchEnd);
+        
+        setDraggedPath(null);
+        setDragOverPath(null);
+        
+        // This brief delay ensures click handlers can check the isDragging flag before it's reset
+        setTimeout(() => {
+            dragStateRef.current.isDragging = false;
+            dragStateRef.current.draggedPath = null;
+        }, 50);
+    };
+    
+    const handleTouchStart = (e: React.TouchEvent, path: string) => {
+        dragStateRef.current = {
+            isDragging: false,
+            draggedPath: path,
+            startX: e.touches[0].clientX,
+            startY: e.touches[0].clientY
+        };
+        window.addEventListener('touchmove', handleTouchMove, { passive: false });
+        window.addEventListener('touchend', handleTouchEnd, { once: true });
+    };
 
   const renderTree = (node: any, depth = 0) => {
     const entries = Object.values(node.children).sort((a: any, b: any) => {
@@ -405,13 +483,22 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
             draggable="true"
             onDragStart={(e) => handleDragStart(e, item.path)}
             onDragEnd={handleDragEnd}
-            className={`flex items-center gap-2 py-1 cursor-pointer text-xs md:text-sm border-l-2 transition-all duration-100 ${activeFile === item.path ? 'bg-[#37373d] text-white border-accent' : 'text-gray-400 hover:bg-[#2a2d2e] hover:text-gray-200 border-transparent'} ${isHighlighted ? 'highlight-ai-change' : ''} ${isDragged ? 'opacity-40' : ''}`}
-            style={{ paddingLeft: `${indent}px` }}
-            onClick={() => onFileSelect(item.path)}
-            onContextMenu={(e) => openContextMenu(e, item.path, false)}
+            onTouchStart={(e) => handleTouchStart(e, item.path)}
+            className={`group flex items-center gap-2 py-1 cursor-pointer text-xs md:text-sm border-l-2 transition-all duration-100 ${activeFile === item.path ? 'bg-[#37373d] text-white border-accent' : 'text-gray-400 hover:bg-[#2a2d2e] hover:text-gray-200 border-transparent'} ${isHighlighted ? 'highlight-ai-change' : ''} ${isDragged ? 'opacity-40' : ''}`}
+            style={{ paddingLeft: `${indent}px`, paddingRight: '8px' }}
+            onClick={() => {
+              if (dragStateRef.current.isDragging) return;
+              onFileSelect(item.path);
+            }}
           >
             <FileIcon type={item.type} />
-            <span className="truncate select-none">{item.name}</span>
+            <span className="flex-1 truncate select-none">{item.name}</span>
+            <button
+                onClick={(e) => openContextMenu(e, item.path, false)}
+                className="p-1 rounded hover:bg-active text-gray-500 hover:text-gray-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+            >
+                <MoreVertical className="w-3.5 h-3.5" />
+            </button>
           </div>
         );
       } 
@@ -427,14 +514,25 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
             onDragEnter={(e) => handleDragEnter(e, item.path)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, item.path)}
-            className={`flex items-center gap-1.5 py-1 cursor-pointer text-xs md:text-sm font-medium text-gray-300 hover:bg-[#2a2d2e] transition-colors duration-100 rounded-sm ${isHighlighted ? 'highlight-ai-change' : ''} ${isDragged ? 'opacity-40' : ''} ${isDragOver ? 'bg-accent/20 ring-1 ring-accent' : ''}`}
-            style={{ paddingLeft: `${indent - 4}px` }} // Adjust for chevron icon
-            onClick={() => setExpandedFolders(p => ({...p, [item.path]: !p[item.path]}))}
-            onContextMenu={(e) => openContextMenu(e, item.path, true)}
+            onTouchStart={(e) => handleTouchStart(e, item.path)}
+            data-droppable="true"
+            data-path={item.path}
+            className={`group flex items-center gap-1.5 py-1 cursor-pointer text-xs md:text-sm font-medium text-gray-300 hover:bg-[#2a2d2e] transition-colors duration-100 rounded-sm ${isHighlighted ? 'highlight-ai-change' : ''} ${isDragged ? 'opacity-40' : ''} ${isDragOver ? 'bg-accent/20 ring-1 ring-accent' : ''}`}
+            style={{ paddingLeft: `${indent - 4}px`, paddingRight: '8px' }} // Adjust for chevron icon
+            onClick={() => {
+              if (dragStateRef.current.isDragging) return;
+              setExpandedFolders(p => ({...p, [item.path]: !p[item.path]}));
+            }}
           >
             <span className="opacity-70 shrink-0">{isExpanded ? <ChevronDown className="w-3.5 h-3.5 md:w-4 md:h-4" /> : <ChevronRight className="w-3.5 h-3.5 md:w-4 md:h-4" />}</span>
             <span className="shrink-0">{isExpanded ? <FolderOpen className="w-3.5 h-3.5 md:w-4 md:h-4 text-accent" /> : <Folder className="w-3.5 h-3.5 md:w-4 md:h-4 text-accent" />}</span>
-            <span className="truncate select-none">{item.name}</span>
+            <span className="flex-1 truncate select-none">{item.name}</span>
+            <button
+                onClick={(e) => openContextMenu(e, item.path, true)}
+                className="p-1 rounded hover:bg-active text-gray-500 hover:text-gray-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+            >
+                <MoreVertical className="w-3.5 h-3.5" />
+            </button>
           </div>
           {isExpanded && renderTree(item, depth + 1)}
         </div>
@@ -496,10 +594,11 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
 
       <div 
         className="flex-1 overflow-y-auto custom-scrollbar"
-        onContextMenu={(e) => openContextMenu(e, '/', true)}
         onDragOver={handleDragOver}
         onDragEnter={(e) => handleDragEnter(e, '/')}
         onDrop={(e) => handleDrop(e, '/')}
+        data-droppable="true"
+        data-path="/"
       >
         {searchQuery && Object.keys(filteredTree.children).length === 0 ? (
           <div className="p-4 text-center text-xs text-gray-500">No files found.</div>
