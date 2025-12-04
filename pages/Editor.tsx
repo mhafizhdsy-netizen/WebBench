@@ -755,7 +755,13 @@ const Editor: React.FC = () => {
           )}
           {isMobile && isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="absolute inset-0 bg-black/50 z-30 animate-in fade-in duration-300"></div>}
           
-          {isMobile && mobileTab === 'ai' && <div className="absolute inset-0 z-20 bg-sidebar flex flex-col"><AIChat files={project.files} sessions={chatSessions} activeSessionId={activeSessionId} onSendMessage={handleSendMessage} onRegenerate={handleRegenerate} onClose={() => setMobileTab('editor')} onOpenCheckpoints={() => setIsCheckpointModalOpen(true)} onCreateSession={handleCreateSession} onSwitchSession={setActiveSessionId} onCancel={handleCancelGeneration} onDeleteMessage={handleDeleteMessage} onDeleteSession={handleDeleteSession} /></div>}
+          {isMobile && mobileTab === 'ai' && (
+            <div className="absolute inset-0 z-30 flex items-end justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-300" onClick={() => setMobileTab('editor')}>
+                <div onClick={(e) => e.stopPropagation()} className="w-full h-[90vh] max-h-[800px] bg-sidebar flex flex-col rounded-t-2xl border-t border-border shadow-2xl animate-in slide-in-from-bottom-full duration-300">
+                    <AIChat files={project.files} sessions={chatSessions} activeSessionId={activeSessionId} onSendMessage={handleSendMessage} onRegenerate={handleRegenerate} onClose={() => setMobileTab('editor')} onOpenCheckpoints={() => setIsCheckpointModalOpen(true)} onCreateSession={handleCreateSession} onSwitchSession={setActiveSessionId} onCancel={handleCancelGeneration} onDeleteMessage={handleDeleteMessage} onDeleteSession={handleDeleteSession} />
+                </div>
+            </div>
+          )}
 
           <div className={`bg-background h-full flex flex-col min-w-0 ${isMobile ? (mobileTab === 'editor' ? 'flex flex-1 w-full' : 'hidden') : 'flex-1 relative'}`}>
             <CodeEditor files={project.files} activeFile={activeFile} openFiles={openFiles} onChange={handleFileChange} onCloseFile={handleCloseFile} onSelectFile={handleFileSelect} isMobile={isMobile} />
