@@ -571,9 +571,8 @@ export const projectService = {
         messages: []
       };
     } catch (error: any) {
-      // FIX: Prevent circular structure errors by only throwing the message string.
       const message = (error as Error).message || 'Failed to create chat session.';
-      console.error('Error creating chat session:', message);
+      console.error('Error creating chat session:', error);
       throw new Error(message);
     }
   },
@@ -622,9 +621,8 @@ export const projectService = {
           timestamp: new Date(data.created_at).getTime(),
       };
     } catch (error: any) {
-      // FIX: Prevent circular structure errors by only throwing the message string.
       const message = (error as Error).message || 'Failed to save chat message.';
-      console.error('Error saving chat message:', message);
+      console.error('Error saving chat message:', error);
        if (message.toLowerCase().includes("column")) {
           throw new Error("Database schema mismatch. Please ensure your 'chat_messages' table matches the provided schema and re-run the app.");
       }
@@ -641,7 +639,7 @@ export const projectService = {
       if (error) throw error;
     } catch (error: any) {
       const message = (error as Error).message || 'Failed to delete message.';
-      console.error('Error deleting chat message:', message);
+      console.error('Error deleting chat message:', error);
       throw new Error(message);
     }
   },
@@ -655,7 +653,7 @@ export const projectService = {
       if (error) throw error;
     } catch (error: any) {
        const message = (error as Error).message || 'Failed to delete chat session.';
-      console.error('Error deleting chat session:', message);
+      console.error('Error deleting chat session:', error);
       throw new Error(message);
     }
   },
@@ -676,7 +674,7 @@ export const projectService = {
       }));
     } catch (error: any) {
        const message = (error as Error).message || 'Could not load project checkpoints.';
-      console.error('Error fetching checkpoints:', message);
+      console.error('Error fetching checkpoints:', error);
       throw new Error(message);
     }
   },
@@ -701,7 +699,7 @@ export const projectService = {
       };
     } catch (error: any) {
        const message = (error as Error).message || 'Failed to create checkpoint.';
-      console.error('Error creating checkpoint:', message);
+      console.error('Error creating checkpoint:', error);
       throw new Error(message);
     }
   },
@@ -715,7 +713,7 @@ export const projectService = {
       if (error) throw error;
     } catch (error: any) {
       const message = (error as Error).message || 'Failed to delete checkpoint.';
-      console.error('Error deleting checkpoint:', message);
+      console.error('Error deleting checkpoint:', error);
       throw new Error(message);
     }
   },

@@ -4,10 +4,71 @@ import { projectService } from '../services/projectService';
 import { Button } from '../components/ui/Button';
 import { WebBenchLoader } from '../components/ui/Loader';
 import { SEO } from '../components/ui/SEO';
-// FIX: Import `Loader2` component from `lucide-react` to fix 'Cannot find name' errors.
 import { Mail, Lock, AlertCircle, ArrowRight, Github, Cpu, Sparkles, CheckCircle2, ArrowLeft, Loader2 } from 'lucide-react';
 
 type AuthMode = 'login' | 'signup' | 'forgot';
+
+// --- Sub-components moved outside the main component to prevent re-rendering on state change ---
+
+const AuthFormComponent = ({ 
+  handleAuth, 
+  email, setEmail, 
+  password, setPassword, 
+  setMode, clearState, 
+  loading, mode 
+}: any) => (
+  <form onSubmit={handleAuth} className="space-y-4">
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium text-gray-300 ml-1">Email</label>
+      <div className="relative group">
+        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-gray-500 group-focus-within:text-accent transition-colors" />
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#252526] border border-border focus:border-accent text-white rounded-lg px-3 py-2 text-sm md:px-4 md:py-3 md:text-base pl-9 md:pl-10 outline-none transition-all focus:ring-1 focus:ring-accent/50 placeholder:text-gray-600" placeholder="you@example.com" required />
+      </div>
+    </div>
+    <div className="space-y-1.5">
+      <div className="flex justify-between items-center">
+        <label className="text-sm font-medium text-gray-300 ml-1">Password</label>
+        <button type="button" onClick={() => { setMode('forgot'); clearState(); }} className="text-xs text-accent/80 hover:text-accent hover:underline">Forgot?</button>
+      </div>
+      <div className="relative group">
+        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-gray-500 group-focus-within:text-accent transition-colors" />
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#252526] border border-border focus:border-accent text-white rounded-lg px-3 py-2 text-sm md:px-4 md:py-3 md:text-base pl-9 md:pl-10 outline-none transition-all focus:ring-1 focus:ring-accent/50 placeholder:text-gray-600" placeholder="••••••••" required />
+      </div>
+    </div>
+    <Button type="submit" size="md" className="w-full !h-10 md:!h-12 !text-base" disabled={loading}>
+      {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (
+        <div className="flex items-center gap-2">
+          <span>{mode === 'login' ? 'Sign In' : 'Create Account'}</span>
+          <ArrowRight className="w-4 h-4" />
+        </div>
+      )}
+    </Button>
+  </form>
+);
+
+const ForgotPasswordFormComponent = ({ 
+  handlePasswordResetRequest, 
+  email, setEmail, 
+  setMode, clearState, 
+  loading 
+}: any) => (
+  <form onSubmit={handlePasswordResetRequest} className="space-y-4">
+     <button type="button" onClick={() => { setMode('login'); clearState(); }} className="text-sm text-accent/80 hover:text-accent flex items-center gap-1.5 mb-2 hover:underline">
+      <ArrowLeft className="w-4 h-4" />
+      Back to Sign In
+    </button>
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium text-gray-300 ml-1">Email</label>
+      <div className="relative group">
+        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-gray-500 group-focus-within:text-accent transition-colors" />
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#252526] border border-border focus:border-accent text-white rounded-lg px-3 py-2 text-sm md:px-4 md:py-3 md:text-base pl-9 md:pl-10 outline-none transition-all focus:ring-1 focus:ring-accent/50 placeholder:text-gray-600" placeholder="you@example.com" required />
+      </div>
+    </div>
+    <Button type="submit" size="md" className="w-full !h-10 md:!h-12 !text-base" disabled={loading}>
+      {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Send Reset Link'}
+    </Button>
+  </form>
+);
 
 const Login: React.FC = () => {
   const [mode, setMode] = useState<AuthMode>('login');
@@ -72,56 +133,6 @@ const Login: React.FC = () => {
     }
   };
 
-  const AuthForm = () => (
-    <form onSubmit={handleAuth} className="space-y-4">
-      <div className="space-y-1.5">
-        <label className="text-sm font-medium text-gray-300 ml-1">Email</label>
-        <div className="relative group">
-          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-gray-500 group-focus-within:text-accent transition-colors" />
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#252526] border border-border focus:border-accent text-white rounded-lg px-3 py-2 text-sm md:px-4 md:py-3 md:text-base pl-9 md:pl-10 outline-none transition-all focus:ring-1 focus:ring-accent/50 placeholder:text-gray-600" placeholder="you@example.com" required />
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        <div className="flex justify-between items-center">
-          <label className="text-sm font-medium text-gray-300 ml-1">Password</label>
-          <button type="button" onClick={() => { setMode('forgot'); clearState(); }} className="text-xs text-accent/80 hover:text-accent hover:underline">Forgot?</button>
-        </div>
-        <div className="relative group">
-          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-gray-500 group-focus-within:text-accent transition-colors" />
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#252526] border border-border focus:border-accent text-white rounded-lg px-3 py-2 text-sm md:px-4 md:py-3 md:text-base pl-9 md:pl-10 outline-none transition-all focus:ring-1 focus:ring-accent/50 placeholder:text-gray-600" placeholder="••••••••" required />
-        </div>
-      </div>
-      <Button type="submit" size="md" className="w-full !h-10 md:!h-12 !text-base" disabled={loading}>
-        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (
-          <div className="flex items-center gap-2">
-            <span>{mode === 'login' ? 'Sign In' : 'Create Account'}</span>
-            <ArrowRight className="w-4 h-4" />
-          </div>
-        )}
-      </Button>
-    </form>
-  );
-
-  const ForgotPasswordForm = () => (
-    <form onSubmit={handlePasswordResetRequest} className="space-y-4">
-       <button type="button" onClick={() => { setMode('login'); clearState(); }} className="text-sm text-accent/80 hover:text-accent flex items-center gap-1.5 mb-2 hover:underline">
-        <ArrowLeft className="w-4 h-4" />
-        Back to Sign In
-      </button>
-      <div className="space-y-1.5">
-        <label className="text-sm font-medium text-gray-300 ml-1">Email</label>
-        <div className="relative group">
-          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-gray-500 group-focus-within:text-accent transition-colors" />
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#252526] border border-border focus:border-accent text-white rounded-lg px-3 py-2 text-sm md:px-4 md:py-3 md:text-base pl-9 md:pl-10 outline-none transition-all focus:ring-1 focus:ring-accent/50 placeholder:text-gray-600" placeholder="you@example.com" required />
-        </div>
-      </div>
-      <Button type="submit" size="md" className="w-full !h-10 md:!h-12 !text-base" disabled={loading}>
-        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Send Reset Link'}
-      </Button>
-    </form>
-  );
-
-
   return (
     <>
       <SEO 
@@ -160,7 +171,28 @@ const Login: React.FC = () => {
               </div>
             )}
 
-            {mode === 'forgot' ? <ForgotPasswordForm /> : <AuthForm />}
+            {mode === 'forgot' ? (
+              <ForgotPasswordFormComponent 
+                handlePasswordResetRequest={handlePasswordResetRequest}
+                email={email}
+                setEmail={setEmail}
+                setMode={setMode}
+                clearState={clearState}
+                loading={loading}
+              />
+            ) : (
+              <AuthFormComponent 
+                handleAuth={handleAuth}
+                email={email}
+                setEmail={setEmail}
+                password={password}
+                setPassword={setPassword}
+                setMode={setMode}
+                clearState={clearState}
+                loading={loading}
+                mode={mode}
+              />
+            )}
 
             {mode !== 'forgot' && (
               <>

@@ -121,17 +121,20 @@ interface AIChatProps {
   onRegenerate: (sessionId: string) => Promise<void>;
   onClose: () => void;
   onOpenCheckpoints: () => void;
+  onCreateCheckpoint: () => void;
   onCreateSession: () => void;
   onSwitchSession: (sessionId: string) => void;
   onCancel: () => void;
   onDeleteMessage: (messageId: string) => void;
   onDeleteSession: (sessionId: string) => void;
+  onDragStart: (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => void;
+  onResizeStart: (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>, handle: string) => void;
 }
 
 export const AIChat: React.FC<AIChatProps> = ({ 
   files, sessions, activeSessionId, onSendMessage, onRegenerate, onClose, 
-  onOpenCheckpoints, onCreateSession, onSwitchSession, onCancel,
-  onDeleteMessage, onDeleteSession
+  onOpenCheckpoints, onCreateCheckpoint, onCreateSession, onSwitchSession, onCancel,
+  onDeleteMessage, onDeleteSession, onDragStart, onResizeStart
 }) => {
   const [input, setInput] = useState('');
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -142,7 +145,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false);
   const [isSessionDropdownOpen, setIsSessionDropdownOpen] = useState(false);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
-  const [openMessageMenu, setOpenMessageMenu] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, message: ChatMessage } | null>(null);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -151,12 +154,23 @@ export const AIChat: React.FC<AIChatProps> = ({
   const ideasOverlayRef = useRef<HTMLDivElement>(null);
   const sessionDropdownRef = useRef<HTMLDivElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
-  const messageMenuRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const isAutoScrollEnabled = useRef(true);
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
   const isLoading = messages.length > 0 && messages[messages.length - 1].isLoading === true;
+
+  const resizeHandles: { name: string, className: string }[] = [
+    { name: 'top-left', className: 'top-0 left-0 cursor-nwse-resize w-4 h-4' },
+    { name: 'top-right', className: 'top-0 right-0 cursor-nesw-resize w-4 h-4' },
+    { name: 'bottom-left', className: 'bottom-0 left-0 cursor-nesw-resize w-4 h-4' },
+    { name: 'bottom-right', className: 'bottom-0 right-0 cursor-nwse-resize w-4 h-4' },
+    { name: 'top', className: 'top-0 left-0 w-full h-2 cursor-ns-resize' },
+    { name: 'bottom', className: 'bottom-0 left-0 w-full h-2 cursor-ns-resize' },
+    { name: 'left', className: 'top-0 left-0 h-full w-2 cursor-ew-resize' },
+    { name: 'right', className: 'top-0 right-0 h-full w-2 cursor-ew-resize' }
+  ];
 
   const fetchAiSuggestions = useCallback(async () => {
     setIsSuggestionsLoading(true);
@@ -188,13 +202,13 @@ export const AIChat: React.FC<AIChatProps> = ({
       if (isModelDropdownOpen && modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
         setIsModelDropdownOpen(false);
       }
-      if (openMessageMenu && messageMenuRef.current && !messageMenuRef.current.contains(event.target as Node)) {
-        setOpenMessageMenu(null);
+      if (contextMenu && contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
+        setContextMenu(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isIdeasOverlayOpen, isSessionDropdownOpen, isModelDropdownOpen, openMessageMenu]);
+  }, [isIdeasOverlayOpen, isSessionDropdownOpen, isModelDropdownOpen, contextMenu]);
 
   const handleScroll = () => {
     if (scrollRef.current) {
@@ -278,13 +292,70 @@ export const AIChat: React.FC<AIChatProps> = ({
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent, message: ChatMessage) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, message });
+  };
+
   const ModelIcon = MODEL_CONFIG[selectedModel].icon;
 
+  const renderContextMenu = () => {
+    if (!contextMenu) return null;
+    
+    const { message } = contextMenu;
+    const msgIndex = messages.findIndex(m => m.clientId === message.clientId);
+    const isLastAssistantMsg = message.role === 'assistant' && !message.isError && 
+      (msgIndex === messages.length - 1 || (msgIndex === messages.length - 2 && messages[messages.length - 1].isLoading)) && 
+      messages.some(m => m.role === 'user');
+
+    return (
+      <div
+        ref={contextMenuRef}
+        style={{ top: contextMenu.y, left: contextMenu.x }}
+        className="fixed z-[101] w-48 bg-[#2d2d30] border border-border rounded-lg shadow-2xl py-1 animate-in fade-in zoom-in-95"
+      >
+        {isLastAssistantMsg && (
+          <button onClick={() => { handleRegenerate(); setContextMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors">
+            <RefreshCw className="w-3 h-3 md:w-3.5 md:h-3.5"/> Regenerate
+          </button>
+        )}
+        {message.role === 'assistant' && !message.isLoading && !message.isError && message.id && (
+          <button onClick={() => { onCreateCheckpoint(); setContextMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors">
+            <History className="w-3 h-3 md:w-3.5 md:h-3.5"/> New Checkpoint
+          </button>
+        )}
+        {(isLastAssistantMsg || (message.role === 'assistant' && !message.isLoading && !message.isError && message.id)) && (
+          <div className="my-1 h-px bg-border mx-1"></div>
+        )}
+        {message.id && (
+          <button onClick={() => { if (message.id) onDeleteMessage(message.id); setContextMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-red-400 hover:bg-red-500/20 transition-colors">
+            <Trash2 className="w-3 h-3 md:w-3.5 md:h-3.5"/> Delete
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div className="h-full min-h-0 flex flex-col bg-sidebar border-l border-border relative shadow-2xl">
+    <div className="h-full w-full flex flex-col bg-sidebar relative">
       <input type="file" multiple ref={fileInputRef} onChange={handleFileChange} className="hidden" accept={ALLOWED_MIME_TYPES.join(',')} />
+      {renderContextMenu()}
       
-      <div className="h-9 md:h-10 px-3 md:px-4 flex items-center justify-between border-b border-border shrink-0 bg-[#252526]/80 backdrop-blur-sm z-10">
+      {resizeHandles.map(handle => (
+        <div
+          key={handle.name}
+          className={`absolute z-20 ${handle.className}`}
+          onMouseDown={(e) => onResizeStart(e, handle.name)}
+          onTouchStart={(e) => onResizeStart(e, handle.name)}
+        />
+      ))}
+      
+      <div 
+        onMouseDown={onDragStart}
+        onTouchStart={onDragStart}
+        className="h-9 md:h-10 px-3 md:px-4 flex items-center justify-between border-b border-border shrink-0 bg-[#252526]/80 backdrop-blur-sm z-10 cursor-grab active:cursor-grabbing"
+      >
         <div className="flex items-center gap-2">
           <div className="relative" ref={sessionDropdownRef}>
             <button onClick={() => setIsSessionDropdownOpen(p => !p)} className="flex items-center gap-1.5 p-1 md:p-1.5 rounded-md hover:bg-white/10 transition-colors">
@@ -339,11 +410,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                   </div>
                 );
               }
-              
-              const isLastAssistantMsg = msg.role === 'assistant' && !msg.isError && (index === messages.length - 1 || (index === messages.length - 2 && messages[messages.length - 1].isLoading)) && messages.some(m => m.role === 'user');
 
               return (
-                <div key={msg.clientId} className={`flex flex-col w-full animate-fade-in group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div key={msg.clientId} onContextMenu={(e) => handleContextMenu(e, msg)} className={`flex flex-col w-full animate-fade-in group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                     <div className={`flex w-full max-w-[95%] md:max-w-[90%] min-w-0 items-end gap-1.5 md:gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
                       
                       <div className={`w-6 h-6 md:w-8 md:h-8 rounded-lg flex items-center justify-center shrink-0 border shadow-sm self-start ${msg.role === 'assistant' ? 'bg-gradient-to-br from-[#2d2d2d] to-[#1e1e1e] border-[#3e3e3e]' : 'bg-accent/90 border-accent/50'}`}>
@@ -351,28 +420,6 @@ export const AIChat: React.FC<AIChatProps> = ({
                       </div>
 
                       <div className={`relative min-w-0 rounded-2xl p-2.5 md:p-4 text-sm leading-relaxed shadow-md ${msg.role === 'user' ? 'bg-accent text-white rounded-tr-sm' : 'bg-[#252526] border border-border text-gray-300 rounded-tl-sm'}`}>
-                        
-                         {msg.id && !isLoading && (
-                            <div ref={openMessageMenu === msg.clientId ? messageMenuRef : null} className={`absolute bottom-0 z-10 ${msg.role === 'user' ? 'left-[-36px] md:left-[-40px]' : 'right-[-36px] md:right-[-40px]'}`}>
-                              <button onClick={() => setOpenMessageMenu(openMessageMenu === msg.clientId ? null : msg.clientId)} className="p-1 rounded-full text-gray-500 hover:text-white hover:bg-active transition-colors opacity-0 group-hover:opacity-100" title="More options" >
-                                <MoreVertical className="w-3 h-3 md:w-4 md:h-4" />
-                              </button>
-                              {openMessageMenu === msg.clientId && (
-                                <div className={`absolute z-20 w-40 md:w-48 bg-[#2d2d30] border border-border rounded-lg shadow-2xl py-1 animate-in fade-in zoom-in-95 bottom-full mb-1 ${msg.role === 'user' ? 'right-0' : 'left-0'}`}>
-                                  {isLastAssistantMsg && (
-                                    <>
-                                      <button onClick={() => { handleRegenerate(); setOpenMessageMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"> <RefreshCw className="w-3 h-3 md:w-3.5 md:h-3.5"/> Regenerate </button>
-                                      <button onClick={() => { onOpenCheckpoints(); setOpenMessageMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"> <History className="w-3 h-3 md:w-3.5 md:h-3.5"/> Create Checkpoint </button>
-                                      <div className="my-1 h-px bg-border mx-1"></div>
-                                    </>
-                                  )}
-                                  <button onClick={() => { if (msg.id) onDeleteMessage(msg.id); setOpenMessageMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-red-400 hover:bg-red-500/20 transition-colors" > <Trash2 className="w-3 h-3 md:w-3.5 md:h-3.5" /> Delete </button>
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-
                         {msg.isError ? (
                            <div className="flex items-start gap-2 md:gap-3 text-red-400">
                              <AlertTriangle className="w-4 h-4 md:w-5 md:h-5 shrink-0 mt-0.5" />

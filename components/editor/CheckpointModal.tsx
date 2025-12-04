@@ -77,7 +77,7 @@ export const CheckpointModal: React.FC<CheckpointModalProps> = ({ isOpen, onClos
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="w-full max-w-6xl bg-sidebar border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in duration-200 flex flex-col h-full max-h-[90vh]">
         <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
           <div className="flex items-center gap-3">

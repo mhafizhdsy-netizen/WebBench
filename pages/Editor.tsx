@@ -19,7 +19,7 @@ import {
 import JSZip from 'jszip';
 import { ActionModal } from '../components/dashboard/ActionModal';
 
-type SidebarView = 'files' | 'ai' | 'search';
+type SidebarView = 'files' | 'search';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 // Regex to match a complete file code block including the path comment
@@ -52,8 +52,21 @@ const Editor: React.FC = () => {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [isCreateCheckpointModalOpen, setIsCreateCheckpointModalOpen] = useState(false);
+  const [isChatModalOpen, setIsChatModalOpen] = useState(false);
   
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // State for draggable/resizable modal
+  const modalRef = useRef<HTMLDivElement>(null);
+  const [modalPosition, setModalPosition] = useState({ x: 0, y: 0 });
+  const [modalSize, setModalSize] = useState({ width: 0, height: 0 });
+  const isDraggingRef = useRef(false);
+  const isResizingRef = useRef(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
+  const dragStartPos = useRef({ x: 0, y: 0 });
+  const initialModalState = useRef({ x: 0, y: 0, width: 0, height: 0 });
+  const resizeHandleRef = useRef<string | null>(null);
+  const firstOpen = useRef(true);
 
   useEffect(() => {
     const handleResize = () => {
@@ -117,6 +130,25 @@ const Editor: React.FC = () => {
     }, 2000);
     return () => clearTimeout(timeout);
   }, [project, loading]);
+
+  useEffect(() => {
+    if (isChatModalOpen) {
+      if (firstOpen.current) {
+        const defaultWidth = Math.min(window.innerWidth * 0.8, 768);
+        const defaultHeight = Math.min(window.innerHeight * 0.75, 650);
+        const defaultX = Math.max(16, (window.innerWidth - defaultWidth) / 2);
+        const defaultY = Math.max(16, (window.innerHeight - defaultHeight) / 2);
+  
+        setModalSize({ width: defaultWidth, height: defaultHeight });
+        setModalPosition({ x: defaultX, y: defaultY });
+        
+        firstOpen.current = false;
+      }
+    } else {
+      firstOpen.current = true;
+    }
+  }, [isChatModalOpen]);
+
 
   const handleCreateSession = async (pId = projectId) => {
     if (!pId) return;
@@ -638,6 +670,119 @@ const Editor: React.FC = () => {
     }
   };
 
+  // --- Draggable & Resizable Modal Logic ---
+  const handleMove = useCallback((e: MouseEvent | TouchEvent) => {
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+    if (isResizingRef.current && resizeHandleRef.current && modalRef.current) {
+      const dx = clientX - dragStartPos.current.x;
+      const dy = clientY - dragStartPos.current.y;
+      
+      let newWidth = initialModalState.current.width;
+      let newHeight = initialModalState.current.height;
+      let newX = initialModalState.current.x;
+      let newY = initialModalState.current.y;
+      
+      const handle = resizeHandleRef.current;
+
+      if (handle.includes('right')) newWidth = initialModalState.current.width + dx;
+      if (handle.includes('bottom')) newHeight = initialModalState.current.height + dy;
+      if (handle.includes('left')) {
+        newWidth = initialModalState.current.width - dx;
+        newX = initialModalState.current.x + dx;
+      }
+      if (handle.includes('top')) {
+        newHeight = initialModalState.current.height - dy;
+        newY = initialModalState.current.y + dy;
+      }
+
+      const minWidth = 400;
+      const minHeight = 300;
+      if (newWidth < minWidth) {
+        if (handle.includes('left')) newX = initialModalState.current.x + initialModalState.current.width - minWidth;
+        newWidth = minWidth;
+      }
+      if (newHeight < minHeight) {
+        if (handle.includes('top')) newY = initialModalState.current.y + initialModalState.current.height - minHeight;
+        newHeight = minHeight;
+      }
+
+      setModalSize({ width: newWidth, height: newHeight });
+      setModalPosition({ x: newX, y: newY });
+
+    } else if (isDraggingRef.current && modalRef.current) {
+      let newX = clientX - dragOffset.current.x;
+      let newY = clientY - dragOffset.current.y;
+      
+      const modalWidth = modalRef.current.offsetWidth;
+      const modalHeight = modalRef.current.offsetHeight;
+      
+      newX = Math.max(16, Math.min(newX, window.innerWidth - modalWidth - 16));
+      newY = Math.max(16, Math.min(newY, window.innerHeight - modalHeight - 16));
+  
+      setModalPosition({ x: newX, y: newY });
+    }
+  }, []);
+
+  const handleEnd = useCallback(() => {
+    isDraggingRef.current = false;
+    isResizingRef.current = false;
+    resizeHandleRef.current = null;
+    window.removeEventListener('mousemove', handleMove);
+    window.removeEventListener('mouseup', handleEnd);
+    window.removeEventListener('touchmove', handleMove);
+    window.removeEventListener('touchend', handleEnd);
+    document.body.style.userSelect = '';
+  }, [handleMove]);
+
+  const handleDragStart = useCallback((e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    if (!modalRef.current) return;
+    const isTouchEvent = 'touches' in e;
+    const clientX = isTouchEvent ? e.touches[0].clientX : e.clientX;
+    const clientY = isTouchEvent ? e.touches[0].clientY : e.clientY;
+    
+    isDraggingRef.current = true;
+    dragOffset.current = {
+      x: clientX - modalRef.current.getBoundingClientRect().left,
+      y: clientY - modalRef.current.getBoundingClientRect().top,
+    };
+    
+    if (isTouchEvent) {
+      window.addEventListener('touchmove', handleMove);
+      window.addEventListener('touchend', handleEnd);
+    } else {
+      window.addEventListener('mousemove', handleMove);
+      window.addEventListener('mouseup', handleEnd);
+    }
+    
+    document.body.style.userSelect = 'none';
+  }, [handleMove, handleEnd]);
+  
+  const handleResizeStart = useCallback((e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>, handle: string) => {
+    e.stopPropagation();
+    isResizingRef.current = true;
+    resizeHandleRef.current = handle;
+    
+    const isTouchEvent = 'touches' in e;
+    const clientX = isTouchEvent ? e.touches[0].clientX : e.clientX;
+    const clientY = isTouchEvent ? e.touches[0].clientY : e.clientY;
+
+    dragStartPos.current = { x: clientX, y: clientY };
+    initialModalState.current = { ...modalPosition, ...modalSize };
+    
+    if (isTouchEvent) {
+      window.addEventListener('touchmove', handleMove);
+      window.addEventListener('touchend', handleEnd);
+    } else {
+      window.addEventListener('mousemove', handleMove);
+      window.addEventListener('mouseup', handleEnd);
+    }
+    
+    document.body.style.userSelect = 'none';
+  }, [modalPosition, modalSize, handleMove, handleEnd]);
+
+
   if (loading) return <div className="h-screen flex items-center justify-center bg-background text-white"><Loader2 className="animate-spin w-7 h-7 md:w-8 md:h-8"/></div>;
 
   if (loadError) return (
@@ -682,6 +827,40 @@ const Editor: React.FC = () => {
           }}
         />
       )}
+
+      {isChatModalOpen && (
+        <div 
+          ref={modalRef}
+          style={{
+            position: 'fixed',
+            top: `${modalPosition.y}px`,
+            left: `${modalPosition.x}px`,
+            width: modalSize.width > 0 ? `${modalSize.width}px` : undefined,
+            height: modalSize.height > 0 ? `${modalSize.height}px` : undefined,
+            zIndex: 50,
+          }}
+          className="bg-sidebar border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in-95 duration-200 flex flex-col overflow-hidden"
+        >
+          <AIChat 
+            files={project.files} 
+            sessions={chatSessions} 
+            activeSessionId={activeSessionId} 
+            onSendMessage={handleSendMessage} 
+            onRegenerate={handleRegenerate} 
+            onClose={() => setIsChatModalOpen(false)} 
+            onOpenCheckpoints={() => setIsCheckpointModalOpen(true)} 
+            onCreateCheckpoint={() => setIsCreateCheckpointModalOpen(true)}
+            onCreateSession={handleCreateSession} 
+            onSwitchSession={setActiveSessionId} 
+            onCancel={handleCancelGeneration} 
+            onDeleteMessage={handleDeleteMessage} 
+            onDeleteSession={handleDeleteSession}
+            onDragStart={handleDragStart}
+            onResizeStart={handleResizeStart}
+          />
+        </div>
+      )}
+
       <div className="h-screen flex flex-col bg-background text-gray-300 overflow-hidden transition-colors duration-300">
         <header className="h-9 md:h-10 bg-[#1e1e1e] border-b border-[#2b2b2b] flex items-center justify-between px-2 md:px-3 z-20 shrink-0 select-none">
           <div className="flex items-center gap-2 md:gap-3">
@@ -709,7 +888,7 @@ const Editor: React.FC = () => {
             {isMobile ? (
               <>
               <button onClick={() => { setMobileTab('preview'); setRefreshTrigger(p => p + 1); }} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${mobileTab === 'preview' ? 'text-accent' : 'text-gray-400'}`} title="Preview"><Play className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
-              <button onClick={() => setMobileTab('ai')} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${mobileTab === 'ai' ? 'text-accent' : 'text-gray-400'}`} title="AI Assistant"><Sparkles className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
+              <button onClick={() => setIsChatModalOpen(true)} className={`p-1.5 rounded hover:bg-white/10 transition-colors text-gray-400`} title="AI Assistant"><Sparkles className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
               </>
             ) : (
               <button onClick={() => setShowPreview(!showPreview)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${showPreview ? 'text-accent' : 'text-gray-400'}`} title="Toggle Preview Pane"><LayoutTemplate className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
@@ -737,12 +916,11 @@ const Editor: React.FC = () => {
               <div className={`w-10 md:w-12 bg-[#252526] border-r border-[#2b2b2b] flex-col items-center py-2 shrink-0 z-30 ${isMobile ? 'hidden' : 'flex'}`}>
                 <button onClick={() => toggleSidebar('files')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'files' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Explorer"><Files className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'files' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
                 <button onClick={() => toggleSidebar('search')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'search' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Search"><Search className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'search' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
-                <button onClick={() => toggleSidebar('ai')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'ai' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="AI Assistant"><Sparkles className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'ai' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
+                <button onClick={() => setIsChatModalOpen(true)} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative text-gray-500 hover:text-gray-300`} title="AI Assistant"><Sparkles className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" /></button>
               </div>
               <div className={`transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-56 md:w-64 lg:w-72' : 'w-0'} overflow-hidden`}>
                   <div className="w-56 md:w-64 lg:w-72 h-full bg-sidebar border-r border-border flex flex-col shrink-0">
                       {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={handleFileSelect} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />}
-                      {sidebarView === 'ai' && <AIChat files={project.files} sessions={chatSessions} activeSessionId={activeSessionId} onSendMessage={handleSendMessage} onRegenerate={handleRegenerate} onClose={() => setIsSidebarOpen(false)} onOpenCheckpoints={() => setIsCheckpointModalOpen(true)} onCreateSession={handleCreateSession} onSwitchSession={setActiveSessionId} onCancel={handleCancelGeneration} onDeleteMessage={handleDeleteMessage} onDeleteSession={handleDeleteSession} />}
                       {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-7 h-7 md:w-8 md:h-8 mx-auto mb-2 opacity-50" />Global search coming soon</div>}
                   </div>
               </div>
@@ -755,14 +933,6 @@ const Editor: React.FC = () => {
           )}
           {isMobile && isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="absolute inset-0 bg-black/50 z-30 animate-in fade-in duration-300"></div>}
           
-          {isMobile && mobileTab === 'ai' && (
-            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-300" onClick={() => setMobileTab('editor')}>
-                <div onClick={(e) => e.stopPropagation()} className="w-full h-[90vh] max-w-lg max-h-[800px] bg-sidebar flex flex-col rounded-2xl border border-border shadow-2xl animate-in zoom-in-95 duration-200">
-                    <AIChat files={project.files} sessions={chatSessions} activeSessionId={activeSessionId} onSendMessage={handleSendMessage} onRegenerate={handleRegenerate} onClose={() => setMobileTab('editor')} onOpenCheckpoints={() => setIsCheckpointModalOpen(true)} onCreateSession={handleCreateSession} onSwitchSession={setActiveSessionId} onCancel={handleCancelGeneration} onDeleteMessage={handleDeleteMessage} onDeleteSession={handleDeleteSession} />
-                </div>
-            </div>
-          )}
-
           <div className={`bg-background h-full flex flex-col min-w-0 ${isMobile ? (mobileTab === 'editor' ? 'flex flex-1 w-full' : 'hidden') : 'flex-1 relative'}`}>
             <CodeEditor files={project.files} activeFile={activeFile} openFiles={openFiles} onChange={handleFileChange} onCloseFile={handleCloseFile} onSelectFile={handleFileSelect} isMobile={isMobile} />
           </div>
