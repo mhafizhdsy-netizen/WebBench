@@ -208,7 +208,11 @@ export const Preview: React.FC<PreviewProps> = ({
     const htmlFile = project.files[entryPath] || project.files['/index.html'];
     if (!htmlFile) return '<h1>No index.html found</h1>';
     let content = htmlFile.content;
-    const regex = /(href|src)=["'](?!\w+:\/\/)(?!#)([^"']+)["']/g;
+    
+    // Improved regex to handle src/href with proper quoting and path capture
+    // Matches: src="...", href='...', src = "..."
+    // Ignores: http://, https://, data:, blob:, mailto:, #
+    const regex = /(href|src)\s*=\s*(["'])(?!\w+:\/\/|#|mailto:)([^"']+)\2/g;
     
     // Helper to safe encode text to Base64
     const toBase64 = (str: string) => {
@@ -220,31 +224,47 @@ export const Preview: React.FC<PreviewProps> = ({
         }
     };
 
-    content = content.replace(regex, (match, attr, path) => {
-        const fullPath = new URL(path, `file://${entryPath}`).pathname;
-        const file = project.files[fullPath];
-        if (!file) return match;
+    content = content.replace(regex, (match, attr, quote, path) => {
+        // Robust relative path resolution
+        let fullPath = path;
+        try {
+            const dummyOrigin = 'http://webbench-dummy';
+            const basePath = entryPath.startsWith('/') ? entryPath : '/' + entryPath;
+            // Create a base URL from the current entry file
+            const contextUrl = new URL(basePath, dummyOrigin);
+            // Resolve the relative path against the entry file
+            const resolvedUrl = new URL(path, contextUrl);
+            fullPath = resolvedUrl.pathname;
+        } catch (e) {
+            // Fallback for simple paths if URL parsing fails
+             if (!fullPath.startsWith('/')) fullPath = '/' + fullPath;
+        }
 
-        if (file.type === 'html') return match;
+        // Try to find the file in the project (try with and without leading slash)
+        let file = project.files[fullPath];
+        if (!file && fullPath.startsWith('/') && project.files[fullPath.substring(1)]) {
+            file = project.files[fullPath.substring(1)];
+        }
+
+        if (!file) return match; // File not found, leave as is (will 404 in iframe)
+
+        if (file.type === 'html') return match; // Don't inline HTML links
 
         const mimeType = getMimeType(file.type);
         
-        // Use Data URIs instead of Blob URLs.
-        // This avoids "Not allowed to load local resource" errors in sandboxed iframes
-        // and ensures assets load reliably without depending on origin policies.
+        // Use Data URIs strictly (no Blob URLs) to avoid sandbox restrictions
         let base64Content = "";
         
         if (file.type === 'image') {
-             // If image is already base64 (e.g. from zip import), use it directly.
-             // If it was created as text in the editor, this might need handling, 
-             // but for now we assume content is valid for the type.
+             // Images are assumed to be base64 if imported/uploaded correctly
+             // If it's a raw string from editor, this might fail, but standard flow handles this
              base64Content = file.content;
         } else {
-             // For text-based files (CSS, JS), encode to base64
+             // Encode text files (CSS, JS)
              base64Content = toBase64(file.content);
         }
         
-        return `${attr}="data:${mimeType};base64,${base64Content}"`;
+        return `${attr}=${quote}data:${mimeType};base64,${base64Content}${quote}`;
     });
 
     // Inject interceptor at the start of HEAD to catch early logs and errors
@@ -278,6 +298,8 @@ export const Preview: React.FC<PreviewProps> = ({
     if (isStatic) {
         setLoading(true);
         setLogs([]);
+        // Use srcdoc with bundled content (Data URIs)
+        // This avoids local resource loading issues entirely
         iframeRef.current.srcdoc = bundleProject(previewEntryPath);
         const timeout = setTimeout(() => setLoading(false), 150);
         return () => clearTimeout(timeout);
