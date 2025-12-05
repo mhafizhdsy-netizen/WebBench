@@ -193,6 +193,17 @@ export const Preview: React.FC<PreviewProps> = ({
     }
   }, [logs, activeTab, showPanel]);
 
+  const getMimeType = (fileType: string) => {
+    switch (fileType) {
+        case 'html': return 'text/html';
+        case 'css': return 'text/css';
+        case 'javascript': return 'application/javascript';
+        case 'json': return 'application/json';
+        case 'image': return 'image/png'; 
+        default: return 'text/plain';
+    }
+  };
+
   const bundleProject = (entryPath: string) => {
     const htmlFile = project.files[entryPath] || project.files['/index.html'];
     if (!htmlFile) return '<h1>No index.html found</h1>';
@@ -203,14 +214,23 @@ export const Preview: React.FC<PreviewProps> = ({
         const file = project.files[fullPath];
         if (!file) return match;
 
-        // Important: Do not replace HTML files with Blob URLs.
-        // This allows the click interceptor to catch navigation and postMessage to parent.
         if (file.type === 'html') return match;
 
-        const blob = new Blob([file.content], { type: file.type });
+        const mimeType = getMimeType(file.type);
+        const blob = new Blob([file.content], { type: mimeType });
         return `${attr}="${URL.createObjectURL(blob)}"`;
     });
-    content = content.replace('</body>', `<script>${navigationAndConsoleInterceptorScript.replace('%%CURRENT_PATH%%', entryPath)}</script></body>`);
+
+    // Inject interceptor at the start of HEAD to catch early logs and errors
+    const interceptor = `<script>${navigationAndConsoleInterceptorScript.replace('%%CURRENT_PATH%%', entryPath)}</script>`;
+    if (content.includes('<head>')) {
+        content = content.replace('<head>', `<head>${interceptor}`);
+    } else if (content.includes('<html>')) {
+         content = content.replace('<html>', `<html><head>${interceptor}</head>`);
+    } else {
+        content = interceptor + content;
+    }
+
     return content;
   };
 

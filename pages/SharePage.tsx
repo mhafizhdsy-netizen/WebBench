@@ -24,7 +24,15 @@ const WebBenchLogo = ({ className = "w-6 h-6" }) => (
     </svg>
 );
 
-const TechBadge = ({ type }: { type: string }) => {
+const AtomIcon = ({ className }: { className?: string }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="1" />
+        <path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9-4.54-4.52-9.87-6.54-11.9-4.5-2.04 2.03-.02 7.36 4.5 11.9 4.54 4.52 9.87 6.54 11.9 4.5Z" />
+        <path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9-2.03-2.04-7.36-.02-11.9 4.5-4.52 4.54-6.54 9.87-4.5 11.9 2.03 2.04 7.36.02 11.9-4.5Z" />
+    </svg>
+);
+
+const TechBadge: React.FC<{ type: string }> = ({ type }) => {
     let icon = <FileText className="w-3 h-3" />;
     let label = type.toUpperCase();
     // Warna sesuai tema VS Code (File Icon Theme colors)
@@ -63,14 +71,6 @@ const TechBadge = ({ type }: { type: string }) => {
         </div>
     );
 };
-
-const AtomIcon = ({ className }: { className?: string }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="1" />
-        <path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9-4.54-4.52-9.87-6.54-11.9-4.5-2.04 2.03-.02 7.36 4.5 11.9 4.54 4.52 9.87 6.54 11.9 4.5Z" />
-        <path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9-2.03-2.04-7.36-.02-11.9 4.5-4.52 4.54-6.54 9.87-4.5 11.9 2.03 2.04 7.36.02 11.9-4.5Z" />
-    </svg>
-);
 
 // --- Main SharePage Component ---
 
@@ -188,7 +188,7 @@ const SharePage: React.FC = () => {
    }
 
     // --- Data Preparation ---
-    const projectFiles = Object.values(project.files).filter((f: File) => f.name !== '.keep');
+    const projectFiles = (Object.values(project.files) as File[]).filter((f) => f.name !== '.keep');
     
     // Detect Tech Stack
     const techStack = new Set<string>();
