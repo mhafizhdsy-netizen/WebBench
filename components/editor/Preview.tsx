@@ -129,10 +129,10 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger, preview
   const errorCount = logs.filter(log => log.level === 'error').length;
   
   useEffect(() => {
-    if (consoleBodyRef.current) {
+    if (isConsoleOpen && consoleBodyRef.current) {
         consoleBodyRef.current.scrollTop = consoleBodyRef.current.scrollHeight;
     }
-  }, [logs]);
+  }, [logs, isConsoleOpen]);
 
   const bundleProject = (entryPath: string) => {
     const htmlFile = files[entryPath] || files['/index.html'];
@@ -270,7 +270,24 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger, preview
   return (
     <div className="h-full flex flex-col bg-sidebar border-l border-border">
       <div className="h-9 px-3 md:px-4 flex items-center justify-between border-b border-border">
-        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Preview</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Preview</span>
+          <div className="w-px h-4 bg-border"></div>
+          <button 
+              onClick={() => setIsConsoleOpen(!isConsoleOpen)} 
+              title={isConsoleOpen ? "Hide Console" : "Show Console"}
+              className={`flex items-center gap-2 px-2 py-1 rounded-md text-xs transition-colors ${isConsoleOpen ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50 hover:text-gray-200'}`}
+          >
+              <Code className="w-3.5 h-3.5"/>
+              <span>Console</span>
+              {errorCount > 0 && (
+                  <div className={`flex items-center gap-1 rounded-full text-xs px-1.5 ${isConsoleOpen ? 'bg-red-500/50 text-white' : 'bg-red-500/20 text-red-400'}`}>
+                      <AlertTriangle className="w-3 h-3"/>
+                      <span>{errorCount}</span>
+                  </div>
+              )}
+          </button>
+        </div>
         <div className="flex items-center gap-1.5 md:gap-2">
           <button 
             onClick={() => setSize('mobile')} 
@@ -303,7 +320,26 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger, preview
           </button>
         </div>
       </div>
-      <div className={`flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar transition-all duration-300 ${isConsoleOpen ? 'pb-0 md:pb-0' : ''}`}>
+      <div className="flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar relative">
+        
+        {isConsoleOpen && (
+          <div className="absolute top-0 left-0 right-0 z-30 h-48 md:h-56 bg-[#252526]/95 backdrop-blur-sm border-b border-border animate-in slide-in-from-top-4 duration-300">
+            <div className="h-full flex flex-col">
+              <div className="h-8 flex items-center justify-between px-3 md:px-4 shrink-0">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Console Log</span>
+                <button onClick={() => setLogs([])} title="Clear console" className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/10"><Trash2 className="w-3.5 h-3.5 md:w-4 md:h-4"/></button>
+              </div>
+              <div ref={consoleBodyRef} className="flex-1 overflow-y-auto custom-scrollbar p-2 text-xs font-mono">
+                  {logs.map((log, i) => (
+                      <div key={i} className={`flex items-start gap-2 p-1 border-b border-white/5 ${log.level === 'error' ? 'text-red-400 bg-red-500/5' : log.level === 'warn' ? 'text-yellow-400 bg-yellow-500/5' : 'text-gray-300'}`}>
+                         <span className="text-gray-500 shrink-0 select-none">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                         <div className="flex-1 whitespace-pre-wrap break-all">{renderLogMessage(log.message)}</div>
+                      </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
         
         {loading && (
           <div className="absolute inset-0 z-20 bg-sidebar/80 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in">
@@ -325,42 +361,6 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger, preview
             className={`w-full h-full border-none bg-white ${getIframeClasses()}`}
             sandbox="allow-scripts allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox"
           />
-        </div>
-      </div>
-      
-      {/* Console Area */}
-      <div className={`shrink-0 transition-all duration-300 ${isConsoleOpen ? 'h-48 md:h-56' : 'h-8'}`}>
-        <div className="h-full flex flex-col bg-[#252526] border-t border-border">
-          {/* Console Header */}
-          <div className="h-8 flex items-center justify-between px-3 md:px-4 border-b border-border shrink-0">
-             <div className="flex items-center gap-2">
-                <Code className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-400" />
-                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Console</span>
-                {errorCount > 0 && (
-                    <div className="flex items-center gap-1 bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full text-xs">
-                        <AlertTriangle className="w-3 h-3"/>
-                        <span>{errorCount}</span>
-                    </div>
-                )}
-             </div>
-             <div className="flex items-center gap-2">
-                <button onClick={() => setLogs([])} title="Clear console" className="text-gray-400 hover:text-white"><Trash2 className="w-3.5 h-3.5 md:w-4 md:h-4"/></button>
-                <button onClick={() => setIsConsoleOpen(!isConsoleOpen)} title={isConsoleOpen ? "Collapse Console" : "Expand Console"} className="text-gray-400 hover:text-white">
-                    <ChevronUp className={`w-4 h-4 md:w-5 md:h-5 transition-transform ${isConsoleOpen ? '' : 'rotate-180'}`} />
-                </button>
-             </div>
-          </div>
-          {/* Console Body */}
-          {isConsoleOpen && (
-            <div ref={consoleBodyRef} className="flex-1 overflow-y-auto custom-scrollbar p-2 text-xs font-mono">
-                {logs.map((log, i) => (
-                    <div key={i} className={`flex items-start gap-2 p-1 border-b border-white/5 ${log.level === 'error' ? 'text-red-400 bg-red-500/5' : log.level === 'warn' ? 'text-yellow-400 bg-yellow-500/5' : 'text-gray-300'}`}>
-                       <span className="text-gray-500 shrink-0 select-none">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                       <div className="flex-1 whitespace-pre-wrap break-all">{renderLogMessage(log.message)}</div>
-                    </div>
-                ))}
-            </div>
-          )}
         </div>
       </div>
     </div>
