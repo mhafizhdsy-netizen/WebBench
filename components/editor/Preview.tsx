@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Project, File } from '../../types';
-import { RefreshCw, Monitor, Smartphone, Tablet, AlertTriangle, Code, Trash2, X, Terminal, Copy, Check, Server, Loader2 } from 'lucide-react';
+import { Monitor, Smartphone, Tablet, AlertTriangle, Code, X, Terminal, Copy, Check } from 'lucide-react';
 import { WebBenchLoader } from '../ui/Loader';
-import { WebContainer } from '@webcontainer/api';
+import type { StartupStatus } from '../../pages/Editor';
+import { Button } from '../ui/Button';
 
 interface PreviewProps {
   project: Project;
@@ -11,6 +12,9 @@ interface PreviewProps {
   onNavigate: (path: string) => void;
   isMobile?: boolean;
   onClose?: () => void;
+  startupStatus: StartupStatus;
+  startupLog: string;
+  serverUrl: string | null;
 }
 
 type LogLevel = 'log' | 'warn' | 'error';
@@ -20,15 +24,14 @@ interface LogEntry {
   timestamp: number;
 }
 
-type ContainerStatus = 'idle' | 'booting' | 'mounting' | 'installing' | 'starting' | 'running' | 'error';
-const statusMessages: Record<ContainerStatus, string> = {
-    idle: 'Idle',
+const statusMessages: Record<StartupStatus, string> = {
+    idle: 'Preparing WebContainer...',
     booting: 'Booting WebContainer...',
     mounting: 'Writing files to virtual disk...',
     installing: 'Installing dependencies (npm install)...',
     starting: 'Starting dev server (npm run dev)...',
     running: 'Server is live!',
-    error: 'An error occurred.',
+    error: 'An error occurred during startup.',
 };
 
 const navigationAndConsoleInterceptorScript = `
@@ -126,7 +129,10 @@ const InstructionView = ({ projectType }: { projectType: Project['type'] }) => {
     );
 };
 
-export const Preview: React.FC<PreviewProps> = ({ project, refreshTrigger, previewEntryPath, onNavigate, isMobile, onClose }) => {
+export const Preview: React.FC<PreviewProps> = ({ 
+    project, refreshTrigger, previewEntryPath, onNavigate, isMobile, onClose,
+    startupStatus, startupLog, serverUrl 
+}) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [size, setSize] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [loading, setLoading] = useState(false);
@@ -134,16 +140,19 @@ export const Preview: React.FC<PreviewProps> = ({ project, refreshTrigger, previ
   const [activeTab, setActiveTab] = useState<'console' | 'terminal'>('terminal');
   const consoleBodyRef = useRef<HTMLDivElement>(null);
   
-  const webcontainerRef = useRef<WebContainer | null>(null);
-  const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
-  const [serverUrl, setServerUrl] = useState<string | null>(null);
-  const [containerStatus, setContainerStatus] = useState<ContainerStatus>('idle');
-  
   const isStatic = !project.type || project.type === 'starter' || project.type === 'blank';
   const isRunnable = project.type === 'react-vite' || project.type === 'nextjs';
   const isInstructional = !isStatic && !isRunnable;
   
   const errorCount = logs.filter(log => log.level === 'error').length;
+
+  useEffect(() => {
+    console.log('[WebContainer Diagnostic]', {
+      crossOriginIsolated: window.crossOriginIsolated,
+      hasSharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
+      browser: navigator.userAgent
+    });
+  }, []);
   
   useEffect(() => {
     if ((activeTab === 'console' && consoleBodyRef.current)) {
@@ -178,79 +187,7 @@ export const Preview: React.FC<PreviewProps> = ({ project, refreshTrigger, previ
     return () => window.removeEventListener('message', handleMessage);
   }, [project.files, onNavigate, isStatic]);
   
-  const startDevServer = useCallback(async () => {
-    if (!isRunnable || !webcontainerRef.current) return;
-    const wc = webcontainerRef.current;
-
-    const streamToTerminal = async (process: any) => {
-        const reader = process.output.getReader();
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            setTerminalOutput(prev => [...prev, value]);
-        }
-    };
-    
-    setContainerStatus('installing');
-    const installProcess = await wc.spawn('npm', ['install']);
-    streamToTerminal(installProcess);
-    const installExitCode = await installProcess.exit;
-    if (installExitCode !== 0) {
-        setContainerStatus('error');
-        setTerminalOutput(prev => [...prev, `❌ npm install failed with code ${installExitCode}`]);
-        return;
-    }
-
-    setContainerStatus('starting');
-    const startProcess = await wc.spawn('npm', ['run', 'dev']);
-    streamToTerminal(startProcess);
-    
-    wc.on('server-ready', (port, url) => {
-        setServerUrl(url);
-        setContainerStatus('running');
-    });
-
-  }, [isRunnable, project.files]);
-
-  useEffect(() => {
-    if (!isRunnable) {
-        webcontainerRef.current?.teardown();
-        webcontainerRef.current = null;
-        return;
-    }
-    
-    const boot = async () => {
-      if (webcontainerRef.current) return;
-      
-      setContainerStatus('booting');
-      setTerminalOutput([]);
-      setServerUrl(null);
-      
-      const wc = await WebContainer.boot();
-      webcontainerRef.current = wc;
-
-      setContainerStatus('mounting');
-      // FIX: Explicitly type `file` as `File` to fix properties not being found on `unknown` type from Object.values.
-      const filesForWC = Object.values(project.files).reduce((acc, file: File) => {
-          if (file.name !== '.keep') {
-            const path = file.path.startsWith('/') ? file.path.substring(1) : file.path;
-            acc[path] = { file: { contents: file.content } };
-          }
-          return acc;
-      }, {} as any);
-      await wc.mount(filesForWC);
-      
-      await startDevServer();
-    };
-
-    boot();
-
-    return () => {
-        // Don't tear down on re-render, only when component unmounts or project type changes.
-    };
-  }, [isRunnable, project.id, startDevServer]);
-
-
+  // Static project refresh logic
   useEffect(() => {
     if (!iframeRef.current || !isStatic) return;
     setLoading(true);
@@ -259,12 +196,6 @@ export const Preview: React.FC<PreviewProps> = ({ project, refreshTrigger, previ
     const timeout = setTimeout(() => setLoading(false), 150);
     return () => clearTimeout(timeout);
   }, [project.files, refreshTrigger, previewEntryPath, isStatic]);
-  
-  useEffect(() => {
-    if (serverUrl && iframeRef.current) {
-        iframeRef.current.src = serverUrl;
-    }
-  }, [serverUrl]);
   
   const getDeviceClasses = () => {
     switch(size) {
@@ -292,16 +223,42 @@ export const Preview: React.FC<PreviewProps> = ({ project, refreshTrigger, previ
     }
     
     if (isRunnable) {
+        const showLoadingOverlay = startupStatus !== 'running' && startupStatus !== 'idle';
         return (
              <div className="flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar relative">
-                {containerStatus !== 'running' && (
-                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm text-center">
-                        <WebBenchLoader size="md" />
-                        <p className="mt-4 text-sm text-gray-400">{statusMessages[containerStatus]}</p>
-                        {containerStatus === 'error' && <p className="mt-2 text-xs text-red-400">Check the terminal for details.</p>}
+                {showLoadingOverlay && (
+                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm text-center p-4">
+                        {startupStatus === 'error' ? (
+                            <div className="text-center p-4">
+                                <AlertTriangle className="w-10 h-10 text-red-400 mb-4 mx-auto" />
+                                <p className="text-red-400 mb-2 font-semibold">WebContainer failed to start</p>
+                                {!window.crossOriginIsolated ? (
+                                    <p className="text-xs text-gray-400 mb-4 max-w-sm mx-auto">
+                                        Your environment is missing required security headers (COOP/COEP).
+                                        Please check your deployment configuration (e.g., `vercel.json`) and see the startup log for more details.
+                                    </p>
+                                ) : (
+                                    <p className="text-xs text-gray-400 mb-4">
+                                        Check the startup log or browser console for details.
+                                    </p>
+                                )}
+                                <Button 
+                                  onClick={() => window.location.reload()} 
+                                  className="mt-3"
+                                  size="sm"
+                                >
+                                  Retry
+                                </Button>
+                            </div>
+                        ) : (
+                            <>
+                                <WebBenchLoader size="md" />
+                                <p className="mt-4 text-sm text-gray-400">{statusMessages[startupStatus]}</p>
+                            </>
+                        )}
                     </div>
                 )}
-                 <iframe ref={iframeRef} title="preview" className="w-full h-full border-none bg-white rounded-lg" sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" />
+                 <iframe ref={iframeRef} src={serverUrl || 'about:blank'} title="preview" className="w-full h-full border-none bg-white rounded-lg" sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" />
              </div>
         );
     }
@@ -316,8 +273,6 @@ export const Preview: React.FC<PreviewProps> = ({ project, refreshTrigger, previ
       </div>
     );
   };
-  
-  const bottomPanelHeight = isRunnable ? 'h-48' : 'h-full';
 
   return (
     <div className="h-full flex flex-col bg-sidebar border-l border-border">
@@ -342,7 +297,7 @@ export const Preview: React.FC<PreviewProps> = ({ project, refreshTrigger, previ
         {renderContent()}
         <div className={`flex flex-col bg-sidebar border-t border-border shrink-0 ${isRunnable ? 'h-48' : 'h-auto'}`}>
             <div className="flex items-center border-b border-border">
-                 {isRunnable && <button onClick={() => setActiveTab('terminal')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'terminal' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}><Terminal className="w-3.5 h-3.5"/> Terminal</button>}
+                 {isRunnable && <button onClick={() => setActiveTab('terminal')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'terminal' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}><Terminal className="w-3.5 h-3.5"/> Startup Log</button>}
                  <button onClick={() => setActiveTab('console')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'console' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}>
                     <Code className="w-3.5 h-3.5"/> Console
                     {errorCount > 0 && <div className="flex items-center gap-1 rounded-full text-xs px-1.5 bg-red-500/20 text-red-400"><AlertTriangle className="w-3 h-3"/>{errorCount}</div>}
@@ -361,7 +316,7 @@ export const Preview: React.FC<PreviewProps> = ({ project, refreshTrigger, previ
                 )}
                 {activeTab === 'terminal' && isRunnable && (
                     <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-all h-full">
-                        {terminalOutput.join('').replace(/\n/g, '<br />')}
+                        {startupLog}
                     </pre>
                 )}
             </div>

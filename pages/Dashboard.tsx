@@ -9,7 +9,7 @@ import { ActionModal, ActionModalConfig } from '../components/dashboard/ActionMo
 import { SettingsModal } from '../components/dashboard/SettingsModal';
 import { WebBenchLoader } from '../components/ui/Loader';
 import { SEO } from '../components/ui/SEO';
-import { Plus, FolderOpen, LogOut, Search, Clock, Trash2, Upload, Code2, Settings, LayoutTemplate, Box, GitBranch, Database, Cpu, Layers, MoreVertical, Edit, Copy, AlertCircle, X, Share2, BrainCircuit, Server, Terminal } from 'lucide-react';
+import { Plus, FolderOpen, LogOut, Search, Clock, Trash2, Upload, Settings, Box, MoreVertical, Edit, Copy, AlertCircle, X, Share2, WandSparkles, Atom, AppWindow, ServerCog, FileCode2, Square } from 'lucide-react';
 import JSZip from 'jszip';
 
 // New Logo Component
@@ -23,14 +23,14 @@ const WebBenchLogo = ({ className = "w-8 h-8" }) => (
 
 // Map project types to icons
 const ProjectIconMap: Record<string, React.FC<any>> = {
-    'starter': Code2,
-    'react-vite': BrainCircuit,
-    'nextjs': Server,
-    'laravel': Database,
-    'python': Code2,
-    'php': Code2,
-    'cpp': Terminal,
-    'blank': Layers,
+    'starter': WandSparkles,
+    'react-vite': Atom,
+    'nextjs': AppWindow,
+    'laravel': ServerCog,
+    'python': FileCode2,
+    'php': FileCode2,
+    'cpp': FileCode2,
+    'blank': Square,
     'default': Box
 };
 
@@ -209,7 +209,8 @@ const Dashboard: React.FC = () => {
 
   const getProjectIcon = (projectType: Project['type']) => {
     const Icon = ProjectIconMap[projectType || 'default'] || ProjectIconMap['default'];
-    return <Icon className="text-accent w-6 h-6 md:w-7 md:h-7" />;
+    const colorClass = projectType === 'python' ? 'text-green-400' : 'text-accent';
+    return <Icon className={`${colorClass} w-6 h-6 md:w-7 md:h-7`} />;
   };
 
   return (

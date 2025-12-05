@@ -14,18 +14,33 @@ import { CheckpointModal } from '../components/editor/CheckpointModal';
 import { 
   Menu, Save, ArrowLeft, Layout, MessageSquare, Play, Download, 
   Loader2, Cloud, Settings, Files, Search, Sparkles, X, LayoutTemplate,
-  AlertTriangle, Check, CloudOff, AlertCircle
+  AlertTriangle, Check, CloudOff, AlertCircle, TerminalSquare
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { ActionModal } from '../components/dashboard/ActionModal';
+import { WebContainer } from '@webcontainer/api';
+import { TerminalPanel } from '../components/editor/TerminalPanel';
 
 type SidebarView = 'files' | 'search';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+export type StartupStatus = 'idle' | 'booting' | 'mounting' | 'installing' | 'starting' | 'running' | 'error';
 
 // Regex to match a complete file code block including the path comment
 // This will be used to strip them from the final markdown content display
 const FILE_CODE_BLOCK_FULL_REGEX = /```[a-zA-Z]*\s*\n(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)[\s\S]*?```/g;
 
+const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  return (...args: Parameters<F>): Promise<ReturnType<F>> =>
+    new Promise(resolve => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      timeout = setTimeout(() => resolve(func(...args)), waitFor);
+    });
+};
+
+const WEBCONTAINER_BOOT_TIMEOUT = 30000; // 30 seconds
 
 const Editor: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -69,6 +84,16 @@ const Editor: React.FC = () => {
   const resizeHandleRef = useRef<string | null>(null);
   const firstOpen = useRef(true);
 
+  // --- WebContainer and Terminal State ---
+  const [webcontainerInstance, setWebcontainerInstance] = useState<WebContainer | null>(null);
+  const [startupStatus, setStartupStatus] = useState<StartupStatus>('idle');
+  const [startupLog, setStartupLog] = useState('');
+  const [serverUrl, setServerUrl] = useState<string | null>(null);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState(250);
+  const isTerminalResizingRef = useRef(false);
+  const previousFilesRef = useRef<Record<string, ProjectFile>>();
+
   useEffect(() => {
     const handleResize = () => {
       const newIsMobile = window.innerWidth < 768;
@@ -95,11 +120,10 @@ const Editor: React.FC = () => {
         return;
       }
       setProject(p);
+      previousFilesRef.current = p.files;
       const initialFile = p.files['/index.html'] || p.files['/src/main.tsx'] || p.files['/app/page.tsx'] || p.files['/main.py'] || p.files['/index.php'] || Object.keys(p.files)[0];
 
       if (initialFile) {
-        // FIX: The `initialFile` can be a string (from Object.keys) or a File object.
-        // This handles both cases to correctly extract the file path.
         const path = typeof initialFile === 'string' ? initialFile : initialFile.path;
         handleFileSelect(path);
         setPreviewEntryPath(p.files['/index.html'] ? '/index.html' : '/');
@@ -116,7 +140,6 @@ const Editor: React.FC = () => {
         setChatSessions(loadedSessions);
         setActiveSessionId(loadedSessions[0].id);
       } else {
-        // Create a default session if none exist
         await handleCreateSession(projectId);
       }
 
@@ -127,11 +150,150 @@ const Editor: React.FC = () => {
       setLoading(false);
     }
   }, [projectId]);
+  
+  const streamToLog = useCallback(async (process: any, onData: (data: string) => void) => {
+    const reader = process.output.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        onData(decoder.decode(value));
+    }
+    return process.exit;
+  }, []);
+
+  // --- WebContainer Lifecycle Effect ---
+  useEffect(() => {
+    const isRunnable = project?.type === 'react-vite' || project?.type === 'nextjs';
+    let wcInstance: WebContainer | null = null;
+    let isTornDown = false;
+    let bootTimeoutId: number | undefined;
+
+    if (!isRunnable) {
+      if (webcontainerInstance) webcontainerInstance.teardown();
+      setWebcontainerInstance(null);
+      setStartupStatus('idle');
+      setStartupLog('');
+      setServerUrl(null);
+      return;
+    }
+
+    const runSetup = async () => {
+      if (!project) return;
+      const onData = (data: string) => setStartupLog(prev => prev + data);
+
+      try {
+        setStartupStatus('booting');
+        onData('>>> Booting WebContainer...\n');
+        console.log('[INFO] Booting WebContainer...');
+
+        const bootPromise = WebContainer.boot();
+        const timeoutPromise = new Promise((_, reject) => {
+          bootTimeoutId = window.setTimeout(
+            () => reject(new Error(`Boot timeout after ${WEBCONTAINER_BOOT_TIMEOUT / 1000} seconds`)),
+            WEBCONTAINER_BOOT_TIMEOUT
+          );
+        });
+        
+        wcInstance = await Promise.race([bootPromise, timeoutPromise]) as WebContainer;
+        clearTimeout(bootTimeoutId);
+        bootTimeoutId = undefined; // Clear the ID after clearing the timeout
+
+        if (isTornDown) return wcInstance.teardown();
+        setWebcontainerInstance(wcInstance);
+        onData('[INFO] WebContainer booted successfully.\n');
+        console.log('[INFO] WebContainer booted successfully.');
+        
+        wcInstance.on('error', (err) => {
+          console.error("[ERROR] WebContainer runtime error:", err);
+          setStartupStatus('error');
+          onData(`\n[ERROR] WebContainer runtime error: ${err.message}\n`);
+        });
+
+        wcInstance.on('server-ready', (port, url) => {
+          setServerUrl(url);
+          setStartupStatus('running');
+          onData(`\n[INFO] Server is live at ${url}\n`);
+          console.log(`[INFO] Server ready at ${url}`);
+        });
+
+        setStartupStatus('mounting');
+        onData('>>> Mounting files...\n');
+        console.log('[INFO] Mounting files...');
+        const filesForWC = Object.values(project.files).reduce((acc, file: ProjectFile) => {
+          if (file.name !== '.keep') {
+            const path = file.path.startsWith('/') ? file.path.substring(1) : file.path;
+            acc[path] = { file: { contents: file.content } };
+          }
+          return acc;
+        }, {} as any);
+        await wcInstance.mount(filesForWC);
+        onData('[INFO] Files mounted.\n');
+        console.log('[INFO] Files mounted.');
+
+        setStartupStatus('installing');
+        onData('\n>>> Running `npm install` (this may take a minute)...\n');
+        console.log('[INFO] Running npm install...');
+        const installProcess = await wcInstance.spawn('npm', ['install']);
+        const installExitCode = await streamToLog(installProcess, onData);
+        if (installExitCode !== 0) {
+          throw new Error(`npm install failed with exit code ${installExitCode}.`);
+        }
+        onData('[INFO] Dependencies installed.\n');
+        console.log('[INFO] Dependencies installed.');
+
+        setStartupStatus('starting');
+        onData('\n>>> Starting dev server with `npm run dev`...\n');
+        console.log('[INFO] Starting dev server...');
+        const startProcess = await wcInstance.spawn('npm', ['run', 'dev']);
+        streamToLog(startProcess, onData);
+
+      } catch (err: any) {
+        if (isTornDown) return;
+        console.error("WebContainer setup failed:", err);
+        setStartupStatus('error');
+        
+        let errorMessage = `\n[ERROR] ${err.message}\n`;
+        let troubleshootingMessage = '';
+
+        // Check for the most likely cause first: missing COOP/COEP headers.
+        if (!window.crossOriginIsolated) {
+          errorMessage = '\n[ERROR] Critical environment requirement missing: crossOriginIsolated is false.\n';
+          troubleshootingMessage = 'Troubleshooting: WebContainer requires a secure context with specific headers (COOP/COEP). Please ensure your deployment environment (e.g., vercel.json) is configured correctly. For local development, these headers might need to be set by your dev server.\n';
+        } else if (err.message.includes('timeout')) {
+          troubleshootingMessage = 'Troubleshooting: The process timed out. This can happen due to a slow network connection or if the browser is under heavy load. Please try refreshing the page. Ensure you are using a Chromium-based browser (Chrome, Edge).\n';
+        } else {
+          troubleshootingMessage = 'Troubleshooting: An unexpected error occurred. Check the browser console for more details and ensure your internet connection is stable.\n'
+        }
+        
+        onData(errorMessage + troubleshootingMessage);
+      }
+    };
+    
+    runSetup();
+
+    return () => {
+      isTornDown = true;
+      if (bootTimeoutId) {
+          clearTimeout(bootTimeoutId);
+      }
+      if (wcInstance) {
+        console.log('[INFO] Tearing down WebContainer instance.');
+        wcInstance.teardown();
+      }
+      setWebcontainerInstance(null);
+      setStartupStatus('idle');
+      setStartupLog('');
+      setServerUrl(null);
+    };
+  }, [project?.id, streamToLog]);
+
 
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
   
+  // --- Autosave Effect ---
   useEffect(() => {
     if (loading || saveStatus === 'saving') return;
     const timeout = setTimeout(() => {
@@ -139,6 +301,40 @@ const Editor: React.FC = () => {
     }, 2000);
     return () => clearTimeout(timeout);
   }, [project, loading]);
+
+  // --- Debounced File Update for WebContainer ---
+  const writeFilesToContainer = useCallback(debounce(async (filesToWrite: Record<string, string>) => {
+    if (!webcontainerInstance) return;
+    setStartupLog(prev => prev + '\n>>> Applying file changes...\n');
+    for (const [path, content] of Object.entries(filesToWrite)) {
+        const wcPath = path.startsWith('/') ? path.substring(1) : path;
+        try {
+            await webcontainerInstance.fs.writeFile(wcPath, content);
+        } catch (e: any) {
+            console.error(`Failed to write file ${path}:`, e);
+            setStartupLog(prev => prev + `\n[ERROR] Error writing ${path}: ${e.message}\n`);
+        }
+    }
+    setStartupLog(prev => prev + '[INFO] Changes applied.\n');
+  }, 1000), [webcontainerInstance]);
+
+  // --- Live File Update Effect ---
+  useEffect(() => {
+      if (startupStatus === 'running' && project && previousFilesRef.current) {
+          const changedFiles: Record<string, string> = {};
+          for (const path in project.files) {
+              if (project.files[path].content !== previousFilesRef.current[path]?.content) {
+                  changedFiles[path] = project.files[path].content;
+              }
+          }
+
+          if (Object.keys(changedFiles).length > 0) {
+              writeFilesToContainer(changedFiles);
+          }
+      }
+      previousFilesRef.current = project?.files;
+  }, [project?.files, startupStatus, writeFilesToContainer]);
+
 
   useEffect(() => {
     if (isChatModalOpen) {
@@ -842,6 +1038,30 @@ const Editor: React.FC = () => {
     
     document.body.style.userSelect = 'none';
   }, [modalPosition, modalSize, handleMove, handleEnd]);
+  
+  const handleTerminalResizeMove = useCallback((e: MouseEvent) => {
+    if (isTerminalResizingRef.current) {
+        const newHeight = window.innerHeight - e.clientY;
+        if (newHeight >= 100 && newHeight <= window.innerHeight * 0.8) {
+            setTerminalHeight(newHeight);
+        }
+    }
+  }, []);
+
+  const handleTerminalResizeEnd = useCallback(() => {
+    isTerminalResizingRef.current = false;
+    window.removeEventListener('mousemove', handleTerminalResizeMove);
+    window.removeEventListener('mouseup', handleTerminalResizeEnd);
+    document.body.style.userSelect = '';
+  }, [handleTerminalResizeMove]);
+
+  const handleTerminalResizeStart = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    isTerminalResizingRef.current = true;
+    window.addEventListener('mousemove', handleTerminalResizeMove);
+    window.addEventListener('mouseup', handleTerminalResizeEnd, { once: true });
+    document.body.style.userSelect = 'none';
+  }, [handleTerminalResizeMove, handleTerminalResizeEnd]);
 
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-background text-white"><Loader2 className="animate-spin w-7 h-7 md:w-8 md:h-8"/></div>;
@@ -858,6 +1078,8 @@ const Editor: React.FC = () => {
   );
   
   if (!project) return null;
+  
+  const isRunnableProject = project.type === 'react-vite' || project.type === 'nextjs';
 
   return (
     <>
@@ -923,7 +1145,7 @@ const Editor: React.FC = () => {
       )}
 
       <div className="h-screen flex flex-col bg-background text-gray-300 overflow-hidden transition-colors duration-300">
-        <header className="h-9 md:h-10 bg-[#1e1e1e] border-b border-[#2b2b2b] flex items-center justify-between px-2 md:px-3 z-20 shrink-0 select-none">
+        <header className="h-9 md:h-10 bg-[#1e1e1e] border-b border-[#2b2b2b] flex items-center justify-between px-2 md:px-3 z-30 shrink-0 select-none">
           <div className="flex items-center gap-2 md:gap-3">
             {isMobile && (
               <div className="flex items-center gap-1">
@@ -952,7 +1174,14 @@ const Editor: React.FC = () => {
               <button onClick={() => setIsChatModalOpen(true)} className={`p-1.5 rounded hover:bg-white/10 transition-colors text-gray-400`} title="AI Assistant"><Sparkles className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
               </>
             ) : (
-              <button onClick={() => setShowPreview(!showPreview)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${showPreview ? 'text-accent' : 'text-gray-400'}`} title="Toggle Preview Pane"><LayoutTemplate className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
+                <>
+                  {isRunnableProject && (
+                      <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isTerminalOpen ? 'text-accent' : 'text-gray-400'}`} title="Toggle Terminal">
+                          <TerminalSquare className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                      </button>
+                  )}
+                  <button onClick={() => setShowPreview(!showPreview)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${showPreview ? 'text-accent' : 'text-gray-400'}`} title="Toggle Preview Pane"><LayoutTemplate className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
+                </>
             )}
             <button onClick={() => setIsSettingsOpen(true)} className="p-1.5 rounded hover:bg-white/10 transition-colors text-gray-400" title="Settings">
               <Settings className="w-3.5 h-3.5 md:w-4 md:h-4" />
@@ -963,53 +1192,84 @@ const Editor: React.FC = () => {
           </div>
         </header>
 
-        <main className="flex-1 flex overflow-hidden relative">
-          {actionError && (
-             <div className="absolute top-3 right-3 z-[101] p-3 md:p-4 max-w-xs md:max-w-sm bg-red-500/20 border border-red-500/30 rounded-lg flex items-start gap-2 md:gap-3 text-red-300 text-xs md:text-sm animate-fade-in shadow-2xl">
-              <AlertCircle className="w-4 h-4 md:w-5 md:h-5 shrink-0 mt-0.5 text-red-400" />
-              <span>{actionError}</span>
-              <button onClick={() => setActionError(null)} className="ml-auto p-1 rounded-full hover:bg-white/10">
-                <X className="w-3.5 h-3.5 md:w-4 md:h-4"/>
-              </button>
-            </div>
-          )}
-          <div className="flex shrink-0">
-              <div className={`w-10 md:w-12 bg-[#252526] border-r border-[#2b2b2b] flex-col items-center py-2 shrink-0 z-30 ${isMobile ? 'hidden' : 'flex'}`}>
-                <button onClick={() => toggleSidebar('files')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'files' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Explorer"><Files className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'files' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
-                <button onClick={() => toggleSidebar('search')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'search' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Search"><Search className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'search' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
-                <button onClick={() => setIsChatModalOpen(true)} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative text-gray-500 hover:text-gray-300`} title="AI Assistant"><Sparkles className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" /></button>
-              </div>
-              <div className={`transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-56 md:w-64 lg:w-72' : 'w-0'} overflow-hidden`}>
-                  <div className="w-56 md:w-64 lg:w-72 h-full bg-sidebar border-r border-border flex flex-col shrink-0">
-                      {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={handleFileSelect} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />}
-                      {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-7 h-7 md:w-8 md:h-8 mx-auto mb-2 opacity-50" />Global search coming soon</div>}
+        <main className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-1 flex overflow-hidden relative">
+              {actionError && (
+                 <div className="absolute top-3 right-3 z-[101] p-3 md:p-4 max-w-xs md:max-w-sm bg-red-500/20 border border-red-500/30 rounded-lg flex items-start gap-2 md:gap-3 text-red-300 text-xs md:text-sm animate-fade-in shadow-2xl">
+                  <AlertCircle className="w-4 h-4 md:w-5 md:h-5 shrink-0 mt-0.5 text-red-400" />
+                  <span>{actionError}</span>
+                  <button onClick={() => setActionError(null)} className="ml-auto p-1 rounded-full hover:bg-white/10">
+                    <X className="w-3.5 h-3.5 md:w-4 md:h-4"/>
+                  </button>
+                </div>
+              )}
+              <div className="flex shrink-0">
+                  <div className={`w-10 md:w-12 bg-[#252526] border-r border-[#2b2b2b] flex-col items-center py-2 shrink-0 z-30 ${isMobile ? 'hidden' : 'flex'}`}>
+                    <button onClick={() => toggleSidebar('files')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'files' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Explorer"><Files className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'files' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
+                    <button onClick={() => toggleSidebar('search')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'search' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Search"><Search className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'search' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
+                    <button onClick={() => setIsChatModalOpen(true)} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative text-gray-500 hover:text-gray-300`} title="AI Assistant"><Sparkles className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" /></button>
+                  </div>
+                  <div className={`transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-56 md:w-64 lg:w-72' : 'w-0'} overflow-hidden`}>
+                      <div className="w-56 md:w-64 lg:w-72 h-full bg-sidebar border-r border-border flex flex-col shrink-0">
+                          {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={handleFileSelect} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />}
+                          {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-7 h-7 md:w-8 md:h-8 mx-auto mb-2 opacity-50" />Global search coming soon</div>}
+                      </div>
                   </div>
               </div>
-          </div>
-          
-          {isMobile && isSidebarOpen && (
-            <div className="absolute top-0 left-0 h-full w-4/5 max-w-[280px] z-40 bg-sidebar border-r border-border flex flex-col animate-in slide-in-from-left-full duration-300">
-              <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={path => { handleFileSelect(path); setIsSidebarOpen(false); }} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />
-            </div>
-          )}
-          {isMobile && isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="absolute inset-0 bg-black/50 z-30 animate-in fade-in duration-300"></div>}
-          
-          <div className={`bg-background h-full flex flex-col min-w-0 ${isMobile ? (mobileTab === 'editor' ? 'flex flex-1 w-full' : 'hidden') : 'flex-1 relative'}`}>
-            <CodeEditor files={project.files} activeFile={activeFile} openFiles={openFiles} onChange={handleFileChange} onCloseFile={handleCloseFile} onSelectFile={handleFileSelect} isMobile={isMobile} />
-          </div>
+              
+              {isMobile && isSidebarOpen && (
+                <div className="absolute top-0 left-0 h-full w-4/5 max-w-[280px] z-40 bg-sidebar border-r border-border flex flex-col animate-in slide-in-from-left-full duration-300">
+                  <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={path => { handleFileSelect(path); setIsSidebarOpen(false); }} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />
+                </div>
+              )}
+              {isMobile && isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="absolute inset-0 bg-black/50 z-30 animate-in fade-in duration-300"></div>}
+              
+              <div className={`bg-background h-full flex flex-col min-w-0 ${isMobile ? (mobileTab === 'editor' ? 'flex flex-1 w-full' : 'hidden') : 'flex-1 relative'}`}>
+                <CodeEditor 
+                  files={project.files} 
+                  activeFile={activeFile} 
+                  openFiles={openFiles} 
+                  onChange={handleFileChange} 
+                  onCloseFile={handleCloseFile} 
+                  onSelectFile={handleFileSelect} 
+                  isMobile={isMobile}
+                  isRunnableProject={isRunnableProject}
+                  onToggleTerminal={() => setIsTerminalOpen(p => !p)}
+                />
+              </div>
 
-          {((!isMobile && showPreview) || (isMobile && mobileTab === 'preview')) && (
-            <div className={`bg-sidebar border-l border-border h-full flex flex-col transition-colors duration-300 ${isMobile ? 'w-full absolute inset-0 z-10' : 'md:w-2/5 lg:w-1/3 shrink-0 relative'}`}>
-              <Preview 
-                project={project}
-                refreshTrigger={refreshTrigger} 
-                previewEntryPath={previewEntryPath}
-                onNavigate={setPreviewEntryPath}
-                isMobile={isMobile}
-                onClose={() => setMobileTab('editor')}
-              />
+              {((!isMobile && showPreview) || (isMobile && mobileTab === 'preview')) && (
+                <div className={`bg-sidebar border-l border-border h-full flex flex-col transition-colors duration-300 ${isMobile ? 'w-full absolute inset-0 z-10' : 'md:w-2/5 lg:w-1/3 shrink-0 relative'}`}>
+                  <Preview 
+                    project={project}
+                    refreshTrigger={refreshTrigger} 
+                    previewEntryPath={previewEntryPath}
+                    onNavigate={setPreviewEntryPath}
+                    isMobile={isMobile}
+                    onClose={() => setMobileTab('editor')}
+                    startupStatus={startupStatus}
+                    startupLog={startupLog}
+                    serverUrl={serverUrl}
+                  />
+                </div>
+              )}
             </div>
-          )}
+
+            {isTerminalOpen && isRunnableProject && (
+                <>
+                    <div 
+                        onMouseDown={handleTerminalResizeStart}
+                        className="w-full h-1.5 bg-border hover:bg-accent cursor-row-resize transition-colors"
+                    ></div>
+                    <div style={{ height: `${terminalHeight}px` }} className="bg-background shrink-0">
+                        <TerminalPanel 
+                            webcontainerInstance={webcontainerInstance}
+                            isContainerReady={startupStatus !== 'booting' && startupStatus !== 'idle'}
+                            onClose={() => setIsTerminalOpen(false)}
+                        />
+                    </div>
+                </>
+            )}
         </main>
       </div>
     </>

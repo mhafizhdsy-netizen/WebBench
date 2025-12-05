@@ -7,7 +7,7 @@ import {
   X, ChevronRight, FileCode, FileJson, FileType, MoreVertical, 
   Undo2, Redo2, Search, Replace, AlignLeft, CheckSquare,
   MessageSquare, Trash2, Copy, List, FoldVertical, UnfoldVertical,
-  Scissors, XCircle, AlertTriangle, BrainCircuit, Terminal, Database
+  Scissors, XCircle, AlertTriangle, Terminal, FileCode2, Atom, TerminalSquare
 } from 'lucide-react';
 
 interface CodeEditorProps {
@@ -18,10 +18,13 @@ interface CodeEditorProps {
   onCloseFile: (path: string) => void;
   onSelectFile: (path: string) => void;
   isMobile: boolean;
+  isRunnableProject: boolean;
+  onToggleTerminal: () => void;
 }
 
 export const CodeEditor: React.FC<CodeEditorProps> = ({ 
-  files, activeFile, openFiles, onChange, onCloseFile, onSelectFile, isMobile 
+  files, activeFile, openFiles, onChange, onCloseFile, onSelectFile, isMobile,
+  isRunnableProject, onToggleTerminal
 }) => {
   const { editorSettings, currentTheme } = useSettings();
   const editorRef = useRef<any>(null);
@@ -136,6 +139,11 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     editorRef.current.focus();
   };
 
+  const handleToggleTerminal = () => {
+    onToggleTerminal();
+    setShowMenu(false);
+  };
+
   const getLanguage = (type: File['type']) => {
     switch (type) {
       case 'html': return 'html';
@@ -158,11 +166,11 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
       case 'html': return <FileCode className={`${className} text-orange-500`} />;
       case 'css': return <FileCode className={`${className} text-blue-400`} />;
       case 'javascript': return <FileCode className={`${className} text-yellow-400`} />;
-      case 'typescript':
-      case 'tsx': return <BrainCircuit className={`${className} text-blue-400`} />;
-      case 'python': return <FileCode className={`${className} text-green-400`} />;
+      case 'typescript': return <FileCode className={`${className} text-blue-400`} />;
+      case 'tsx': return <Atom className={`${className} text-blue-400`} />;
+      case 'python': return <FileCode2 className={`${className} text-green-400`} />;
       case 'php':
-      case 'blade': return <Database className={`${className} text-indigo-400`} />;
+      case 'blade': return <FileCode2 className={`${className} text-indigo-400`} />;
       case 'cpp': return <Terminal className={`${className} text-cyan-400`} />;
       default: return <FileType className={`${className} text-gray-400`} />;
     }
@@ -275,6 +283,14 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
               <button onClick={() => triggerAction('selectAll')} className="w-full text-left px-3 py-1.5 md:py-2 text-xs text-gray-300 hover:bg-[#094771] hover:text-white flex items-center gap-2">
                 <CheckSquare className="w-3 h-3 md:w-3.5 md:h-3.5" /> Select All <span className="ml-auto opacity-50 text-[9px] md:text-[10px]">Ctrl+A</span>
               </button>
+              {isRunnableProject && (
+                <>
+                  <div className="px-3 py-1.5 text-[9px] md:text-[10px] uppercase font-bold text-gray-500 border-b border-[#333] my-1">Tools</div>
+                  <button onClick={handleToggleTerminal} className="w-full text-left px-3 py-1.5 md:py-2 text-xs text-gray-300 hover:bg-[#094771] hover:text-white flex items-center gap-2">
+                    <TerminalSquare className="w-3 h-3 md:w-3.5 md:h-3.5" /> Toggle Terminal
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

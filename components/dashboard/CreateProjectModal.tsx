@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '../ui/Button';
 import { Project } from '../../types';
-import { X, Loader2, File, Code, Server, Database, BrainCircuit, Check, Code2, Terminal } from 'lucide-react';
+import { X, Loader2, Check, WandSparkles, Atom, AppWindow, ServerCog, FileCode2, Terminal, Square } from 'lucide-react';
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -10,14 +10,14 @@ interface CreateProjectModalProps {
 }
 
 const templates: { id: Project['type']; name: string; description: string; icon: React.FC<any> }[] = [
-  { id: 'starter', name: 'WebBench Starter', description: 'A responsive HTML, CSS, JS landing page.', icon: Code },
-  { id: 'react-vite', name: 'React + Vite', description: 'A modern React project with TypeScript.', icon: BrainCircuit },
-  { id: 'nextjs', name: 'Next.js', description: 'App Router starter for server-side rendering.', icon: Server },
-  { id: 'laravel', name: 'Laravel', description: 'Basic structure for a PHP backend.', icon: Database },
-  { id: 'python', name: 'Python', description: 'A simple main.py script file.', icon: Code2 },
-  { id: 'php', name: 'PHP', description: 'A basic index.php file.', icon: Code2 },
+  { id: 'starter', name: 'WebBench Starter', description: 'A responsive HTML, CSS, JS landing page.', icon: WandSparkles },
+  { id: 'react-vite', name: 'React + Vite', description: 'A modern React project with TypeScript.', icon: Atom },
+  { id: 'nextjs', name: 'Next.js', description: 'App Router starter for server-side rendering.', icon: AppWindow },
+  { id: 'laravel', name: 'Laravel', description: 'Basic structure for a PHP backend.', icon: ServerCog },
+  { id: 'python', name: 'Python', description: 'A simple main.py script file.', icon: FileCode2 },
+  { id: 'php', name: 'PHP', description: 'A basic index.php file.', icon: FileCode2 },
   { id: 'cpp', name: 'C++', description: 'A classic "Hello World" in C++.', icon: Terminal },
-  { id: 'blank', name: 'Blank Project', description: 'Start with an empty file explorer.', icon: File },
+  { id: 'blank', name: 'Blank Project', description: 'Start with an empty file explorer.', icon: Square },
 ];
 
 export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({ isOpen, onClose, onCreate }) => {
@@ -80,6 +80,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({ isOpen, 
                 {templates.map(template => {
                     const Icon = template.icon;
                     const isSelected = selectedTemplate === template.id;
+                    const iconColor = template.id === 'python' ? 'text-green-400' : 'text-accent';
                     return (
                         <button
                             key={template.id}
@@ -91,7 +92,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({ isOpen, 
                                 : 'border-border hover:border-gray-600 bg-background'
                             }`}
                         >
-                            <Icon className="w-5 h-5 md:w-6 md:h-6 text-accent mr-3 md:mr-4 mt-1 shrink-0" />
+                            <Icon className={`w-5 h-5 md:w-6 md:h-6 ${iconColor} mr-3 md:mr-4 mt-1 shrink-0`} />
                             <div>
                             <h3 className="font-semibold text-white text-base">{template.name}</h3>
                             <p className="text-xs text-gray-500 mt-1">{template.description}</p>
