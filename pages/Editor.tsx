@@ -92,7 +92,7 @@ const Editor: React.FC = () => {
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(250);
   const isTerminalResizingRef = useRef(false);
-  const previousFilesRef = useRef<Record<string, ProjectFile>>();
+  const previousFilesRef = useRef<Record<string, ProjectFile> | undefined>(undefined);
 
   useEffect(() => {
     const handleResize = () => {
@@ -185,27 +185,26 @@ const Editor: React.FC = () => {
       try {
         setStartupStatus('booting');
         onData('>>> Booting WebContainer...\n');
-        console.log('[INFO] Booting WebContainer...');
+        console.log('[WebContainer] Booting...');
 
         const bootPromise = WebContainer.boot();
         const timeoutPromise = new Promise((_, reject) => {
           bootTimeoutId = window.setTimeout(
-            () => reject(new Error(`Boot timeout after ${WEBCONTAINER_BOOT_TIMEOUT / 1000} seconds`)),
+            () => reject(new Error(`WebContainer boot timed out after ${WEBCONTAINER_BOOT_TIMEOUT / 1000}s.`)),
             WEBCONTAINER_BOOT_TIMEOUT
           );
         });
         
         wcInstance = await Promise.race([bootPromise, timeoutPromise]) as WebContainer;
         clearTimeout(bootTimeoutId);
-        bootTimeoutId = undefined; // Clear the ID after clearing the timeout
+        bootTimeoutId = undefined;
 
         if (isTornDown) return wcInstance.teardown();
         setWebcontainerInstance(wcInstance);
-        onData('[INFO] WebContainer booted successfully.\n');
-        console.log('[INFO] WebContainer booted successfully.');
+        console.log('[WebContainer] Booted successfully.');
         
         wcInstance.on('error', (err) => {
-          console.error("[ERROR] WebContainer runtime error:", err);
+          console.error("WebContainer runtime error:", err);
           setStartupStatus('error');
           onData(`\n[ERROR] WebContainer runtime error: ${err.message}\n`);
         });
@@ -214,12 +213,12 @@ const Editor: React.FC = () => {
           setServerUrl(url);
           setStartupStatus('running');
           onData(`\n[INFO] Server is live at ${url}\n`);
-          console.log(`[INFO] Server ready at ${url}`);
+           console.log(`[WebContainer] Server ready at ${url}`);
         });
 
         setStartupStatus('mounting');
         onData('>>> Mounting files...\n');
-        console.log('[INFO] Mounting files...');
+        console.log('[WebContainer] Mounting files...');
         const filesForWC = Object.values(project.files).reduce((acc, file: ProjectFile) => {
           if (file.name !== '.keep') {
             const path = file.path.startsWith('/') ? file.path.substring(1) : file.path;
@@ -229,22 +228,22 @@ const Editor: React.FC = () => {
         }, {} as any);
         await wcInstance.mount(filesForWC);
         onData('[INFO] Files mounted.\n');
-        console.log('[INFO] Files mounted.');
+        console.log('[WebContainer] Files mounted.');
 
         setStartupStatus('installing');
         onData('\n>>> Running `npm install` (this may take a minute)...\n');
-        console.log('[INFO] Running npm install...');
+        console.log('[WebContainer] Running npm install...');
         const installProcess = await wcInstance.spawn('npm', ['install']);
         const installExitCode = await streamToLog(installProcess, onData);
         if (installExitCode !== 0) {
           throw new Error(`npm install failed with exit code ${installExitCode}.`);
         }
         onData('[INFO] Dependencies installed.\n');
-        console.log('[INFO] Dependencies installed.');
+        console.log('[WebContainer] Dependencies installed.');
 
         setStartupStatus('starting');
         onData('\n>>> Starting dev server with `npm run dev`...\n');
-        console.log('[INFO] Starting dev server...');
+        console.log('[WebContainer] Starting dev server...');
         const startProcess = await wcInstance.spawn('npm', ['run', 'dev']);
         streamToLog(startProcess, onData);
 
@@ -252,21 +251,12 @@ const Editor: React.FC = () => {
         if (isTornDown) return;
         console.error("WebContainer setup failed:", err);
         setStartupStatus('error');
-        
-        let errorMessage = `\n[ERROR] ${err.message}\n`;
-        let troubleshootingMessage = '';
-
-        // Check for the most likely cause first: missing COOP/COEP headers.
-        if (!window.crossOriginIsolated) {
-          errorMessage = '\n[ERROR] Critical environment requirement missing: crossOriginIsolated is false.\n';
-          troubleshootingMessage = 'Troubleshooting: WebContainer requires a secure context with specific headers (COOP/COEP). Please ensure your deployment environment (e.g., vercel.json) is configured correctly. For local development, these headers might need to be set by your dev server.\n';
-        } else if (err.message.includes('timeout')) {
-          troubleshootingMessage = 'Troubleshooting: The process timed out. This can happen due to a slow network connection or if the browser is under heavy load. Please try refreshing the page. Ensure you are using a Chromium-based browser (Chrome, Edge).\n';
-        } else {
-          troubleshootingMessage = 'Troubleshooting: An unexpected error occurred. Check the browser console for more details and ensure your internet connection is stable.\n'
+        onData(`\n[ERROR] An error occurred during setup: ${err.message}\n`);
+        if (err.message.includes('timeout')) {
+          onData('Troubleshooting: Please try refreshing the page. Ensure you are on a stable internet connection and using a compatible browser (Chrome or Edge).\n');
+        } else if (!window.crossOriginIsolated) {
+            onData('Troubleshooting: Critical environment requirement missing. This may be due to a configuration issue. COOP/COEP headers are required.\n');
         }
-        
-        onData(errorMessage + troubleshootingMessage);
       }
     };
     
@@ -274,11 +264,9 @@ const Editor: React.FC = () => {
 
     return () => {
       isTornDown = true;
-      if (bootTimeoutId) {
-          clearTimeout(bootTimeoutId);
-      }
+      if (bootTimeoutId) clearTimeout(bootTimeoutId);
       if (wcInstance) {
-        console.log('[INFO] Tearing down WebContainer instance.');
+        console.log('[WebContainer] Tearing down instance.');
         wcInstance.teardown();
       }
       setWebcontainerInstance(null);

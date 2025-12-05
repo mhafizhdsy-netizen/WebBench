@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Project, File } from '../../types';
-import { Monitor, Smartphone, Tablet, AlertTriangle, Code, X, Terminal, Copy, Check } from 'lucide-react';
+import { Monitor, Smartphone, Tablet, AlertTriangle, Code, X, Terminal, Copy, Check, RefreshCw } from 'lucide-react';
 import { WebBenchLoader } from '../ui/Loader';
 import type { StartupStatus } from '../../pages/Editor';
 import { Button } from '../ui/Button';
@@ -35,36 +35,67 @@ const statusMessages: Record<StartupStatus, string> = {
 };
 
 const navigationAndConsoleInterceptorScript = `
-    const originalConsole = { ...window.console };
-    const levels = ['log', 'warn', 'error', 'info', 'debug'];
-    levels.forEach(level => {
-        window.console[level] = (...args) => {
-            originalConsole[level](...args);
-            const serializedArgs = args.map(arg => {
+    (function() {
+        const originalConsole = { ...console };
+        const levels = ['log', 'warn', 'error', 'info', 'debug'];
+        
+        function serialize(arg) {
+            if (arg instanceof Error) return arg.message + '\\n' + (arg.stack || '');
+            if (typeof arg === 'object' && arg !== null) {
                 try {
                     return JSON.stringify(arg);
-                } catch (e) { return 'Unserializable Object'; }
-            });
-            window.parent.postMessage({ type: 'console', level, message: serializedArgs }, '*');
-        };
-    });
-    window.addEventListener('error', (e) => {
-      window.parent.postMessage({ type: 'console', level: 'error', message: [e.message] }, '*');
-    });
-    document.addEventListener('click', (e) => {
-        let target = e.target;
-        while (target && target.tagName !== 'A') { target = target.parentElement; }
-        if (target && target.tagName === 'A') {
-            const href = target.getAttribute('href');
-            if (href && !href.startsWith('http') && !href.startsWith('#')) {
-                e.preventDefault();
-                const currentPath = '%%CURRENT_PATH%%';
-                const currentDir = currentPath.substring(0, currentPath.lastIndexOf('/'));
-                const newPath = new URL(href, 'file://' + currentDir + '/').pathname;
-                window.parent.postMessage({ type: 'navigate', path: newPath }, '*');
+                } catch (e) {
+                    return '[Circular or Unserializable Object]';
+                }
             }
+            return String(arg);
         }
-    }, true);
+
+        levels.forEach(level => {
+            console[level] = (...args) => {
+                originalConsole[level](...args);
+                try {
+                    const message = args.map(serialize);
+                    window.parent.postMessage({ type: 'console', level, message }, '*');
+                } catch(e) {
+                    // ignore
+                }
+            };
+        });
+
+        window.addEventListener('error', (event) => {
+            window.parent.postMessage({ type: 'console', level: 'error', message: [event.message] }, '*');
+        });
+
+        window.addEventListener('unhandledrejection', (event) => {
+             const reason = event.reason instanceof Error ? event.reason.message : String(event.reason);
+             window.parent.postMessage({ type: 'console', level: 'error', message: ['Unhandled Promise Rejection: ' + reason] }, '*');
+        });
+
+        // Navigation interceptor
+        document.addEventListener('click', (e) => {
+            let target = e.target;
+            while (target && target.tagName !== 'A') { target = target.parentElement; }
+            if (target && target.tagName === 'A') {
+                const href = target.getAttribute('href');
+                if (href && !href.startsWith('http') && !href.startsWith('#') && !href.startsWith('mailto:') && !href.startsWith('javascript:')) {
+                    e.preventDefault();
+                    
+                     const currentPath = '%%CURRENT_PATH%%';
+                     let basePath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
+                    if (!basePath.startsWith('/')) basePath = '/' + basePath;
+                    const dummyOrigin = 'http://webbench-preview';
+                    try {
+                        const resolvedUrl = new URL(href, dummyOrigin + basePath);
+                        const newPath = resolvedUrl.pathname;
+                        window.parent.postMessage({ type: 'navigate', path: newPath }, '*');
+                    } catch (err) {
+                        console.error('WebBench Navigation Error:', err);
+                    }
+                }
+            }
+        }, true);
+    })();
 `;
 
 const InstructionView = ({ projectType }: { projectType: Project['type'] }) => {
@@ -138,6 +169,8 @@ export const Preview: React.FC<PreviewProps> = ({
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeTab, setActiveTab] = useState<'console' | 'terminal'>('terminal');
+  const [showPanel, setShowPanel] = useState(false);
+  const [internalRefreshTrigger, setInternalRefreshTrigger] = useState(0);
   const consoleBodyRef = useRef<HTMLDivElement>(null);
   
   const isStatic = !project.type || project.type === 'starter' || project.type === 'blank';
@@ -158,7 +191,7 @@ export const Preview: React.FC<PreviewProps> = ({
     if ((activeTab === 'console' && consoleBodyRef.current)) {
         consoleBodyRef.current.scrollTop = consoleBodyRef.current.scrollHeight;
     }
-  }, [logs, activeTab]);
+  }, [logs, activeTab, showPanel]);
 
   const bundleProject = (entryPath: string) => {
     const htmlFile = project.files[entryPath] || project.files['/index.html'];
@@ -169,6 +202,11 @@ export const Preview: React.FC<PreviewProps> = ({
         const fullPath = new URL(path, `file://${entryPath}`).pathname;
         const file = project.files[fullPath];
         if (!file) return match;
+
+        // Important: Do not replace HTML files with Blob URLs.
+        // This allows the click interceptor to catch navigation and postMessage to parent.
+        if (file.type === 'html') return match;
+
         const blob = new Blob([file.content], { type: file.type });
         return `${attr}="${URL.createObjectURL(blob)}"`;
     });
@@ -189,14 +227,26 @@ export const Preview: React.FC<PreviewProps> = ({
   
   // Static project refresh logic
   useEffect(() => {
-    if (!iframeRef.current || !isStatic) return;
-    setLoading(true);
-    setLogs([]);
-    iframeRef.current.srcdoc = bundleProject(previewEntryPath);
-    const timeout = setTimeout(() => setLoading(false), 150);
-    return () => clearTimeout(timeout);
-  }, [project.files, refreshTrigger, previewEntryPath, isStatic]);
+    if (!iframeRef.current) return;
+    
+    if (isStatic) {
+        setLoading(true);
+        setLogs([]);
+        iframeRef.current.srcdoc = bundleProject(previewEntryPath);
+        const timeout = setTimeout(() => setLoading(false), 150);
+        return () => clearTimeout(timeout);
+    } else if (isRunnable && serverUrl) {
+        // For runnable, we reload the iframe if specific refresh was requested
+        // But mainly standard refresh is handled by WebContainer HMR usually.
+        // If this is a manual refresh:
+        iframeRef.current.src = serverUrl;
+    }
+  }, [project.files, refreshTrigger, internalRefreshTrigger, previewEntryPath, isStatic, serverUrl, isRunnable]);
   
+  const handleManualRefresh = () => {
+    setInternalRefreshTrigger(prev => prev + 1);
+  };
+
   const getDeviceClasses = () => {
     switch(size) {
       case 'mobile': return 'w-[375px] h-[667px] shadow-2xl rounded-2xl border-4 border-gray-700';
@@ -229,27 +279,14 @@ export const Preview: React.FC<PreviewProps> = ({
                 {showLoadingOverlay && (
                     <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm text-center p-4">
                         {startupStatus === 'error' ? (
-                            <div className="text-center p-4">
-                                <AlertTriangle className="w-10 h-10 text-red-400 mb-4 mx-auto" />
-                                <p className="text-red-400 mb-2 font-semibold">WebContainer failed to start</p>
-                                {!window.crossOriginIsolated ? (
-                                    <p className="text-xs text-gray-400 mb-4 max-w-sm mx-auto">
-                                        Your environment is missing required security headers (COOP/COEP).
-                                        Please check your deployment configuration (e.g., `vercel.json`) and see the startup log for more details.
-                                    </p>
-                                ) : (
-                                    <p className="text-xs text-gray-400 mb-4">
-                                        Check the startup log or browser console for details.
-                                    </p>
-                                )}
-                                <Button 
-                                  onClick={() => window.location.reload()} 
-                                  className="mt-3"
-                                  size="sm"
-                                >
-                                  Retry
+                             <>
+                                <AlertTriangle className="w-10 h-10 text-red-400 mb-4" />
+                                <p className="font-semibold text-red-300 mb-2">WebContainer failed to start.</p>
+                                <p className="text-xs text-gray-400 mb-4">Check the browser console (DevTools) and startup log for more details.</p>
+                                <Button onClick={() => window.location.reload()} size="sm">
+                                    Retry
                                 </Button>
-                            </div>
+                             </>
                         ) : (
                             <>
                                 <WebBenchLoader size="md" />
@@ -289,38 +326,73 @@ export const Preview: React.FC<PreviewProps> = ({
                     <div className="w-px h-4 bg-gray-600 mx-1"></div>
                 </>
             )}
-            {isMobile && onClose && <button onClick={onClose} className="p-1 text-gray-400 hover:text-white" title="Close Preview"><X className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>}
+
+            {/* Console Toggle */}
+            <button 
+                onClick={() => setShowPanel(!showPanel)} 
+                className={`p-1 rounded relative ${showPanel ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} 
+                title="Toggle Console"
+            >
+                <Code className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                {!showPanel && errorCount > 0 && (
+                     <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                )}
+            </button>
+
+             {/* Refresh Button */}
+             <button 
+                onClick={handleManualRefresh} 
+                className="p-1 rounded text-gray-400 hover:text-white hover:bg-white/10" 
+                title="Refresh Preview"
+            >
+                <RefreshCw className="w-3.5 h-3.5 md:w-4 md:h-4" />
+            </button>
+
+            {/* Close Button (Mobile only logic passed from parent usually, or generic close) */}
+            {isMobile && onClose && (
+                <button onClick={onClose} className="p-1 text-gray-400 hover:text-white hover:bg-white/10 rounded" title="Close Preview">
+                    <X className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                </button>
+            )}
         </div>
       </div>
       
       <div className="flex-1 flex flex-col min-h-0">
         {renderContent()}
-        <div className={`flex flex-col bg-sidebar border-t border-border shrink-0 ${isRunnable ? 'h-48' : 'h-auto'}`}>
-            <div className="flex items-center border-b border-border">
-                 {isRunnable && <button onClick={() => setActiveTab('terminal')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'terminal' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}><Terminal className="w-3.5 h-3.5"/> Startup Log</button>}
-                 <button onClick={() => setActiveTab('console')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'console' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}>
-                    <Code className="w-3.5 h-3.5"/> Console
-                    {errorCount > 0 && <div className="flex items-center gap-1 rounded-full text-xs px-1.5 bg-red-500/20 text-red-400"><AlertTriangle className="w-3 h-3"/>{errorCount}</div>}
-                 </button>
-            </div>
-            <div className="flex-1 overflow-auto custom-scrollbar">
-                {activeTab === 'console' && (
-                    <div ref={consoleBodyRef} className="p-2 text-xs font-mono">
-                        {logs.map((log, i) => (
-                            <div key={i} className={`flex items-start gap-2 py-1 border-b border-border/50 ${log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-yellow-400' : 'text-gray-300'}`}>
-                                <span className="opacity-60">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                                <div className="flex-1 break-words">{renderLogMessage(log.message)}</div>
-                            </div>
-                        ))}
+        
+        {/* Bottom Panel (Logs/Console) */}
+        {showPanel && (
+            <div className={`flex flex-col bg-sidebar border-t border-border shrink-0 h-48 animate-in slide-in-from-bottom-5 duration-200`}>
+                <div className="flex items-center border-b border-border">
+                    {isRunnable && <button onClick={() => setActiveTab('terminal')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'terminal' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}><Terminal className="w-3.5 h-3.5"/> Startup Log</button>}
+                    <button onClick={() => setActiveTab('console')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'console' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}>
+                        <Code className="w-3.5 h-3.5"/> Console
+                        {errorCount > 0 && <div className="flex items-center gap-1 rounded-full text-xs px-1.5 bg-red-500/20 text-red-400"><AlertTriangle className="w-3 h-3"/>{errorCount}</div>}
+                    </button>
+                    <div className="ml-auto px-2">
+                        <button onClick={() => setShowPanel(false)} className="text-gray-500 hover:text-white"><X className="w-3 h-3"/></button>
                     </div>
-                )}
-                {activeTab === 'terminal' && isRunnable && (
-                    <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-all h-full">
-                        {startupLog}
-                    </pre>
-                )}
+                </div>
+                <div className="flex-1 overflow-auto custom-scrollbar">
+                    {activeTab === 'console' && (
+                        <div ref={consoleBodyRef} className="p-2 text-xs font-mono">
+                            {logs.length === 0 && <div className="text-gray-500 italic p-2">No logs yet. Interact with the preview to see output.</div>}
+                            {logs.map((log, i) => (
+                                <div key={i} className={`flex items-start gap-2 py-1 border-b border-border/50 ${log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-yellow-400' : 'text-gray-300'}`}>
+                                    <span className="opacity-60">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                                    <div className="flex-1 break-words">{renderLogMessage(log.message)}</div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {activeTab === 'terminal' && isRunnable && (
+                        <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-all h-full">
+                            {startupLog}
+                        </pre>
+                    )}
+                </div>
             </div>
-        </div>
+        )}
       </div>
     </div>
   );

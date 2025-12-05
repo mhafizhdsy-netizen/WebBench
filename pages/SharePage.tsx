@@ -5,11 +5,18 @@ import { Project, File } from '../types';
 import { Button } from '../components/ui/Button';
 import { WebBenchLoader } from '../components/ui/Loader';
 import { SEO } from '../components/ui/SEO';
-import { Download, Edit, ArrowLeft, Layers, Clock, FileText, AlertTriangle, Twitter, Linkedin, Copy, Check } from 'lucide-react';
+import { 
+  Download, Edit, ArrowLeft, Clock, FileCode2, 
+  AlertTriangle, Twitter, Linkedin, Copy, Check, 
+  Layers, Code2, Globe, Terminal, Share2, FileText,
+  Hash, Database, Calendar, Eye
+} from 'lucide-react';
 import JSZip from 'jszip';
 import { supabase } from '../services/supabaseClient';
 
-const WebBenchLogo = ({ className = "w-8 h-8" }) => (
+// --- Helper Components for UI ---
+
+const WebBenchLogo = ({ className = "w-6 h-6" }) => (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 2l9 4.9V17L12 22l-9-4.9V7z" className="text-accent fill-accent/20" />
       <path d="M9.5 10l-2.5 2.5 2.5 2.5" className="text-white" />
@@ -17,14 +24,55 @@ const WebBenchLogo = ({ className = "w-8 h-8" }) => (
     </svg>
 );
 
-const ProjectIcon = ({ className = "text-accent w-16 h-16" }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2l9 4.9V17L12 22l-9-4.9V7z" className="fill-accent/20" />
-        <path d="M9.5 10l-2.5 2.5 2.5 2.5" className="stroke-white" />
-        <path d="M14.5 10l2.5 2.5-2.5 2.5" className="stroke-white" />
+const TechBadge = ({ type }: { type: string }) => {
+    let icon = <FileText className="w-3 h-3" />;
+    let label = type.toUpperCase();
+    // Warna sesuai tema VS Code (File Icon Theme colors)
+    let colorClass = "bg-[#2d2d30] text-gray-400 border-gray-700"; 
+
+    if (type === 'react-vite' || type === 'tsx' || type === 'jsx') {
+        icon = <AtomIcon className="w-3 h-3" />;
+        label = "REACT";
+        colorClass = "bg-[#2d2d30] text-[#61dafb] border-[#61dafb]/30";
+    } else if (type === 'typescript' || type === 'ts') {
+        icon = <Code2 className="w-3 h-3" />;
+        label = "TYPESCRIPT";
+        colorClass = "bg-[#2d2d30] text-[#3178c6] border-[#3178c6]/30";
+    } else if (type === 'javascript' || type === 'js') {
+        icon = <Code2 className="w-3 h-3" />;
+        label = "JAVASCRIPT";
+        colorClass = "bg-[#2d2d30] text-[#f7df1e] border-[#f7df1e]/30";
+    } else if (type === 'html') {
+        icon = <Globe className="w-3 h-3" />;
+        label = "HTML5";
+        colorClass = "bg-[#2d2d30] text-[#e34c26] border-[#e34c26]/30";
+    } else if (type === 'css') {
+        icon = <Layers className="w-3 h-3" />;
+        label = "CSS3";
+        colorClass = "bg-[#2d2d30] text-[#264de4] border-[#264de4]/30";
+    } else if (type === 'python' || type === 'py') {
+        icon = <Terminal className="w-3 h-3" />;
+        label = "PYTHON";
+        colorClass = "bg-[#2d2d30] text-[#3572a5] border-[#3572a5]/30";
+    }
+
+    return (
+        <div className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-semibold tracking-wide ${colorClass}`}>
+            {icon}
+            {label}
+        </div>
+    );
+};
+
+const AtomIcon = ({ className }: { className?: string }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="1" />
+        <path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9-4.54-4.52-9.87-6.54-11.9-4.5-2.04 2.03-.02 7.36 4.5 11.9 4.54 4.52 9.87 6.54 11.9 4.5Z" />
+        <path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9-2.03-2.04-7.36-.02-11.9 4.5-4.52 4.54-6.54 9.87-4.5 11.9 2.03 2.04 7.36.02 11.9-4.5Z" />
     </svg>
 );
 
+// --- Main SharePage Component ---
 
 const SharePage: React.FC = () => {
     const { projectId } = useParams<{ projectId: string }>();
@@ -44,6 +92,7 @@ const SharePage: React.FC = () => {
             }
 
             try {
+                // Check session
                 const { data: { session } } = await supabase.auth.getSession();
                 setIsLoggedIn(!!session);
 
@@ -52,7 +101,10 @@ const SharePage: React.FC = () => {
                     setProject(data);
                 }
             } catch (err: any) {
-                setError(err.message || "Failed to load project details.");
+                // Only show error if logged in, otherwise show restricted access screen
+                if (await supabase.auth.getUser().then(r => r.data.user)) {
+                   setError(err.message || "Failed to load project details.");
+                }
             } finally {
                 setLoading(false);
             }
@@ -83,133 +135,275 @@ const SharePage: React.FC = () => {
         window.URL.revokeObjectURL(url);
     };
 
+    // --- Loading State ---
     if (loading) {
-        return <div className="h-screen bg-background flex items-center justify-center"><WebBenchLoader size="lg" text="Loading Project..." /></div>;
-    }
-
-    if (error) {
-         return (
-            <div className="min-h-screen bg-background text-red-400 p-4 flex flex-col items-center justify-center text-center">
-                <AlertTriangle className="w-12 h-12 mb-4"/>
-                <h1 className="text-2xl font-bold text-white mb-2">Error Loading Project</h1>
-                <p className="text-gray-400">{error}</p>
-                <Button onClick={() => navigate('/dashboard')} className="mt-6" variant="secondary">Go to Dashboard</Button>
+        return (
+            <div className="h-screen w-full bg-[#1e1e1e] flex items-center justify-center">
+                <WebBenchLoader size="md" text="Loading Project..." />
             </div>
         );
     }
-    
+
+    // --- Restricted Access State ---
     if (!isLoggedIn) {
         return (
-             <>
-                <SEO title="View Project" description="View this project in WebBench. Log in to start editing."/>
-                 <div className="min-h-screen bg-background text-gray-300 p-4 flex flex-col items-center justify-center text-center relative overflow-hidden">
-                    <div className="absolute inset-0 bg-grid-pattern opacity-10 z-0"></div>
-                    <div className="absolute inset-0 bg-gradient-to-b from-background via-background/80 to-background z-0"></div>
-                    
-                    <div className="relative z-10 bg-sidebar/50 backdrop-blur-lg border border-border p-8 md:p-12 rounded-2xl shadow-2xl max-w-2xl">
-                        <div className="w-20 h-20 mx-auto mb-6"><WebBenchLogo className="w-full h-full" /></div>
-                        <h1 className="text-3xl md:text-4xl font-bold text-white mb-3">You're invited to a project</h1>
-                        <p className="text-gray-400 max-w-md mx-auto mb-8">Log in or create a free WebBench account to view, edit, and collaborate on this project with a powerful AI assistant.</p>
-                        <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                            <Button onClick={() => navigate(`/login`, { state: { from: { pathname: `/editor/${projectId}` } } })} size="lg" className="gap-2 shadow-lg shadow-accent/20 hover:shadow-accent/40 transition-all">
-                                <Edit className="w-5 h-5" /> Open in WebBench
-                            </Button>
+            <>
+                <SEO title="Project Access" description="Login to view this WebBench project."/>
+                <div className="min-h-screen w-full bg-[#1e1e1e] flex items-center justify-center p-4">
+                    <div className="w-full max-w-sm bg-[#252526] border border-[#3e3e42] rounded-lg shadow-2xl p-6 text-center">
+                        <div className="w-12 h-12 bg-[#2d2d30] rounded-full flex items-center justify-center mx-auto mb-4 border border-[#3e3e42]">
+                            <WebBenchLogo className="w-6 h-6 text-accent" />
                         </div>
+                        <h1 className="text-lg font-semibold text-white mb-2">Private Project</h1>
+                        <p className="text-sm text-gray-400 mb-6">
+                            This project is hosted on WebBench. You need to be logged in to view the source code and details.
+                        </p>
+                        <Button 
+                            onClick={() => navigate(`/login`, { state: { from: { pathname: `/share/${projectId}` } } })} 
+                            size="md" 
+                            className="w-full justify-center"
+                        >
+                            Log In to View
+                        </Button>
                     </div>
                 </div>
             </>
         )
     }
-    
-    if (!project) {
-         return (
-            <div className="min-h-screen bg-background text-yellow-400 p-4 flex flex-col items-center justify-center text-center">
-                <AlertTriangle className="w-12 h-12 mb-4"/>
-                <h1 className="text-2xl font-bold text-white mb-2">Project Not Found</h1>
-                <p className="text-gray-400">This project could not be found. It might have been deleted, or you may not have access.</p>
-                <Button onClick={() => navigate('/dashboard')} className="mt-6" variant="secondary">Go to Dashboard</Button>
-            </div>
-        );
-    }
 
+    // --- Error State ---
+    if (error || !project) {
+        return (
+           <div className="min-h-screen w-full bg-[#1e1e1e] flex flex-col items-center justify-center p-4 text-center">
+               <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mb-4 border border-red-500/20">
+                 <AlertTriangle className="w-6 h-6 text-red-400"/>
+               </div>
+               <h1 className="text-xl font-bold text-white mb-2">Project Not Found</h1>
+               <p className="text-gray-400 max-w-xs mb-6 text-sm">{error || "The project you are looking for might have been deleted or you don't have permission to view it."}</p>
+               <Button onClick={() => navigate('/dashboard')} variant="secondary" size="md">
+                    Back to Dashboard
+               </Button>
+           </div>
+       );
+   }
 
+    // --- Data Preparation ---
     const projectFiles = Object.values(project.files).filter((f: File) => f.name !== '.keep');
-    const shareText = `Check out my project "${project.name}" on WebBench, the AI-powered web builder! ${window.location.href}`;
-    const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
-    const linkedinUrl = `https://www.linkedin.com/shareArticle?mini=true&url=${encodeURIComponent(window.location.href)}&title=${encodeURIComponent(project.name)}`;
+    
+    // Detect Tech Stack
+    const techStack = new Set<string>();
+    if (project.type) techStack.add(project.type);
+    projectFiles.forEach(f => {
+        const ext = f.name.split('.').pop();
+        if (ext) techStack.add(ext);
+    });
+    const techStackArray = Array.from(techStack).slice(0, 5);
+
+    const shareUrl = window.location.href;
+    const shareText = `Check out "${project.name}" on WebBench!`;
+    const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`;
+    const linkedinUrl = `https://www.linkedin.com/shareArticle?mini=true&url=${encodeURIComponent(shareUrl)}&title=${encodeURIComponent(project.name)}`;
 
     return (
         <>
-            <SEO title={project.name} description={`View and download the project "${project.name}" on WebBench.`}/>
-             <div className="min-h-screen bg-background text-gray-300 relative overflow-hidden">
-                <div className="absolute inset-0 bg-grid-pattern opacity-5 z-0"></div>
-                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-background via-background/50 to-sidebar/20 z-0"></div>
+            <SEO title={`${project.name} | Overview`} description={`View details for ${project.name}.`} />
+            
+            {/* 
+                Main Container:
+                - min-h-screen: Ensures full height
+                - overflow-y-auto: Enables PARENT scrolling
+                - no-scrollbar: Hides the bar but keeps functionality
+            */}
+            <div className="min-h-screen w-full bg-[#1e1e1e] text-[#cccccc] font-sans overflow-y-auto no-scrollbar selection:bg-accent/30 selection:text-white">
                 
-                <div className="relative z-10 max-w-6xl mx-auto p-4 md:p-8">
-                    <div className="flex justify-between items-center mb-8">
-                        <Link to="/dashboard" className="flex items-center gap-2">
-                           <WebBenchLogo className="w-8 h-8" />
-                           <span className="font-bold text-white text-lg tracking-tight hidden md:block">WebBench</span>
+                {/* Navbar */}
+                <header className="sticky top-0 z-50 w-full bg-[#1e1e1e]/80 backdrop-blur-md border-b border-[#3e3e42]">
+                    <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+                        <Link to="/dashboard" className="flex items-center gap-2 group">
+                            <WebBenchLogo className="w-6 h-6 text-accent group-hover:scale-105 transition-transform" />
+                            <span className="font-bold text-white tracking-tight">WebBench</span>
                         </Link>
-                        <Link to="/dashboard" className="text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-1.5">
-                            <ArrowLeft className="w-4 h-4" /> Back to Dashboard
-                        </Link>
+                        <div className="flex items-center gap-3">
+                            <Link to="/dashboard" className="text-sm font-medium text-gray-400 hover:text-white transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded hover:bg-[#2d2d30]">
+                                <ArrowLeft className="w-4 h-4" /> Back
+                            </Link>
+                            <Button onClick={() => navigate(`/editor/${project.id}`)} size="sm">
+                                <Edit className="w-3.5 h-3.5 mr-2" /> Open Editor
+                            </Button>
+                        </div>
+                    </div>
+                </header>
+
+                <main className="max-w-6xl mx-auto px-4 py-8 md:py-12">
+                    
+                    {/* Header Section */}
+                    <div className="mb-10 flex flex-col md:flex-row md:items-start md:justify-between gap-6">
+                        <div>
+                            <div className="flex items-center gap-2 mb-2">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#2d2d30] text-gray-400 border border-[#3e3e42]">
+                                    Project
+                                </span>
+                                <span className="text-gray-500 text-xs flex items-center gap-1">
+                                    <Clock className="w-3 h-3" /> Last updated {new Date(project.updatedAt).toLocaleDateString()}
+                                </span>
+                            </div>
+                            <h1 className="text-3xl md:text-4xl font-bold text-white mb-3">{project.name}</h1>
+                            <p className="text-gray-400 max-w-2xl text-sm leading-relaxed">
+                                A web project built with WebBench. View statistics, technology stack, and file structure below.
+                            </p>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                            <Button onClick={handleDownload} variant="secondary" size="sm" className="h-9">
+                                <Download className="w-4 h-4 mr-2" /> Download Zip
+                            </Button>
+                            <Button onClick={handleCopy} variant="secondary" size="sm" className="h-9 w-9 px-0">
+                                {copyStatus ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                            </Button>
+                        </div>
                     </div>
 
-                    <main className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-                        <div className="flex flex-col items-center lg:items-start text-center lg:text-left">
-                            <ProjectIcon className="text-accent w-20 h-20 md:w-24 md:h-24 mb-6"/>
-                            <h1 className="text-4xl md:text-5xl font-extrabold text-white leading-tight">{project.name}</h1>
-                            <p className="text-lg text-gray-400 mt-4 max-w-lg">This project is ready to be explored. Open it in the WebBench editor for an AI-powered development experience or download the files as a ZIP archive.</p>
-
-                            <div className="mt-8 flex flex-col sm:flex-row gap-4 w-full justify-center lg:justify-start">
-                                <Button onClick={() => navigate(`/editor/${project.id}`)} size="lg" className="gap-2 w-full sm:w-auto shadow-lg shadow-accent/20 hover:shadow-accent/40 transition-all">
-                                    <Edit className="w-5 h-5" /> Open in Editor
-                                </Button>
-                                <Button onClick={handleDownload} size="lg" variant="secondary" className="gap-2 w-full sm:w-auto">
-                                    <Download className="w-5 h-5" /> Download .ZIP
-                                </Button>
+                    {/* Content Grid */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
+                        
+                        {/* Left Column: Stats & Info */}
+                        <div className="space-y-6">
+                            
+                            {/* Project DNA / Stats */}
+                            <div className="bg-[#252526] border border-[#3e3e42] rounded-lg p-5 shadow-sm">
+                                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                    <Database className="w-3.5 h-3.5" /> Project DNA
+                                </h3>
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-center py-2 border-b border-[#3e3e42]">
+                                        <div className="flex items-center gap-2 text-gray-400 text-sm">
+                                            <Hash className="w-4 h-4" /> ID
+                                        </div>
+                                        <code className="bg-[#1e1e1e] px-2 py-1 rounded text-xs font-mono text-accent">
+                                            {project.id.slice(0,8)}...
+                                        </code>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-[#3e3e42]">
+                                        <div className="flex items-center gap-2 text-gray-400 text-sm">
+                                            <FileCode2 className="w-4 h-4" /> Files
+                                        </div>
+                                        <span className="text-white text-sm font-medium">{projectFiles.length} files</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-[#3e3e42]">
+                                        <div className="flex items-center gap-2 text-gray-400 text-sm">
+                                            <Calendar className="w-4 h-4" /> Created
+                                        </div>
+                                        <span className="text-white text-sm font-medium">{new Date(project.createdAt).toLocaleDateString()}</span>
+                                    </div>
+                                </div>
+                                
+                                <div className="mt-5">
+                                    <h4 className="text-[10px] font-bold text-gray-500 uppercase mb-3">Tech Stack</h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {techStackArray.map(type => <TechBadge key={type} type={type} />)}
+                                    </div>
+                                </div>
                             </div>
 
-                            <div className="mt-10 w-full">
-                                <p className="text-sm text-gray-500 mb-3">Share this project</p>
-                                <div className="flex gap-3 justify-center lg:justify-start">
-                                    <a href={twitterUrl} target="_blank" rel="noopener noreferrer" className="p-3 bg-active rounded-full text-gray-300 hover:bg-[#1DA1F2] hover:text-white transition-colors" title="Share on Twitter"><Twitter className="w-5 h-5" /></a>
-                                    <a href={linkedinUrl} target="_blank" rel="noopener noreferrer" className="p-3 bg-active rounded-full text-gray-300 hover:bg-[#0A66C2] hover:text-white transition-colors" title="Share on LinkedIn"><Linkedin className="w-5 h-5" /></a>
-                                    <button onClick={handleCopy} className="p-3 bg-active rounded-full text-gray-300 hover:bg-accent hover:text-white transition-colors" title="Copy Link">
-                                        {copyStatus ? <Check className="w-5 h-5 text-green-400" /> : <Copy className="w-5 h-5" />}
+                            {/* Share Widget */}
+                            <div className="bg-[#252526] border border-[#3e3e42] rounded-lg p-5 shadow-sm">
+                                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                    <Share2 className="w-3.5 h-3.5" /> Share Project
+                                </h3>
+                                <div className="flex gap-3">
+                                    <a href={twitterUrl} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center py-2 bg-[#1e1e1e] border border-[#3e3e42] rounded hover:bg-[#007acc] hover:border-[#007acc] hover:text-white text-gray-400 transition-colors">
+                                        <Twitter className="w-4 h-4" />
+                                    </a>
+                                    <a href={linkedinUrl} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center py-2 bg-[#1e1e1e] border border-[#3e3e42] rounded hover:bg-[#007acc] hover:border-[#007acc] hover:text-white text-gray-400 transition-colors">
+                                        <Linkedin className="w-4 h-4" />
+                                    </a>
+                                    <button onClick={handleCopy} className="flex-1 flex items-center justify-center py-2 bg-[#1e1e1e] border border-[#3e3e42] rounded hover:bg-green-600 hover:border-green-600 hover:text-white text-gray-400 transition-colors">
+                                        {copyStatus ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                                     </button>
                                 </div>
                             </div>
+
                         </div>
 
-                        <div className="bg-sidebar/50 backdrop-blur-lg border border-border rounded-2xl shadow-xl p-6 h-full">
-                             <h2 className="text-lg font-semibold text-white mb-6">Project Overview</h2>
-                             <div className="space-y-4 text-sm mb-6">
-                                <div className="flex justify-between items-center bg-background/50 p-3 rounded-lg">
-                                    <span className="text-gray-400 flex items-center gap-2"><Layers className="w-4 h-4"/> File Count</span>
-                                    <span className="text-white font-medium">{projectFiles.length}</span>
+                        {/* Right Column: Code Window Preview */}
+                        <div className="lg:col-span-2">
+                            <div className="bg-[#1e1e1e] border border-[#3e3e42] rounded-lg shadow-2xl overflow-hidden flex flex-col h-[500px]">
+                                
+                                {/* Fake Window Titlebar */}
+                                <div className="bg-[#252526] px-4 py-2 flex items-center gap-4 border-b border-[#3e3e42] select-none">
+                                    <div className="flex gap-2">
+                                        <div className="w-3 h-3 rounded-full bg-[#ff5f56]"></div>
+                                        <div className="w-3 h-3 rounded-full bg-[#ffbd2e]"></div>
+                                        <div className="w-3 h-3 rounded-full bg-[#27c93f]"></div>
+                                    </div>
+                                    <div className="flex-1 text-center">
+                                        <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#1e1e1e] rounded text-xs text-gray-400 font-mono border border-[#3e3e42]">
+                                            <Globe className="w-3 h-3" />
+                                            preview.webbench.app
+                                        </div>
+                                    </div>
+                                    <div className="w-10"></div> {/* Spacer for balance */}
                                 </div>
-                                <div className="flex justify-between items-center bg-background/50 p-3 rounded-lg">
-                                    <span className="text-gray-400 flex items-center gap-2"><Clock className="w-4 h-4"/> Last Updated</span>
-                                    <span className="text-white font-medium">{new Date(project.updatedAt).toLocaleString()}</span>
+
+                                {/* Fake Editor Content */}
+                                <div className="flex-1 flex overflow-hidden">
+                                    
+                                    {/* Sidebar File List */}
+                                    <div className="w-48 bg-[#252526] border-r border-[#3e3e42] hidden sm:flex flex-col">
+                                        <div className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Explorer</div>
+                                        <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
+                                            {projectFiles.slice(0, 15).map(file => (
+                                                <div key={file.path} className="flex items-center gap-2 text-xs text-gray-400 px-2 py-1.5 rounded hover:bg-[#37373d] hover:text-white cursor-default truncate">
+                                                    <FileCode2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                                    {file.name}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Main Code Area Placeholder */}
+                                    <div className="flex-1 bg-[#1e1e1e] p-6 relative">
+                                         
+                                         {/* Abstract Code Lines (Skeleton) */}
+                                         <div className="space-y-3 opacity-20 select-none pointer-events-none">
+                                            <div className="flex gap-3">
+                                                <div className="w-16 h-4 bg-purple-500 rounded"></div>
+                                                <div className="w-24 h-4 bg-blue-500 rounded"></div>
+                                                <div className="w-8 h-4 bg-white rounded"></div>
+                                            </div>
+                                            <div className="w-48 h-4 bg-gray-500 rounded ml-8"></div>
+                                            <div className="w-32 h-4 bg-gray-500 rounded ml-8"></div>
+                                            <div className="w-64 h-4 bg-yellow-500 rounded ml-12"></div>
+                                            <div className="h-4"></div>
+                                            <div className="flex gap-3 ml-8">
+                                                <div className="w-20 h-4 bg-red-500 rounded"></div>
+                                                <div className="w-32 h-4 bg-green-500 rounded"></div>
+                                            </div>
+                                            <div className="w-full max-w-sm h-4 bg-gray-500 rounded ml-12"></div>
+                                            <div className="w-full max-w-xs h-4 bg-gray-500 rounded ml-12"></div>
+                                            <div className="h-4"></div>
+                                            <div className="w-24 h-4 bg-blue-500 rounded ml-8"></div>
+                                            <div className="w-full max-w-md h-4 bg-gray-500 rounded ml-12"></div>
+                                         </div>
+
+                                         {/* CTA Overlay */}
+                                         <div className="absolute inset-0 bg-gradient-to-t from-[#1e1e1e] via-[#1e1e1e]/60 to-transparent flex flex-col items-center justify-end pb-12">
+                                            <div className="text-center">
+                                                <Eye className="w-10 h-10 text-gray-600 mx-auto mb-3" />
+                                                <h3 className="text-lg font-semibold text-white mb-1">Peek inside</h3>
+                                                <p className="text-sm text-gray-500 mb-6">Open the editor to view source code and run the project.</p>
+                                                <Button onClick={() => navigate(`/editor/${project.id}`)} size="md" className="shadow-xl px-6">
+                                                    Open In Editor
+                                                </Button>
+                                            </div>
+                                         </div>
+                                    </div>
+
                                 </div>
-                             </div>
-                             
-                             <h3 className="text-md font-semibold text-white mb-3">File Structure</h3>
-                             <div className="max-h-64 overflow-y-auto no-scrollbar bg-background/50 p-3 rounded-lg border border-border/50">
-                                <ul className="space-y-2 text-sm">
-                                    {projectFiles.map((file: File) => (
-                                        <li key={file.path} className="flex items-center gap-2 text-gray-300">
-                                            <FileText className="w-4 h-4 text-gray-500 shrink-0"/>
-                                            <span className="font-mono truncate">{file.path}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                             </div>
+                            </div>
                         </div>
-                    </main>
-                </div>
+
+                    </div>
+                </main>
             </div>
         </>
     );
