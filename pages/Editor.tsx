@@ -8,7 +8,7 @@ import { AIChat } from '../components/editor/AIChat';
 import { Button } from '../components/ui/Button';
 import { SettingsModal } from '../components/dashboard/SettingsModal';
 import { FileExplorer } from '../components/editor/FileExplorer';
-import { generateCodeStream } from '../services/geminiService';
+import { generateResponseStream } from '../services/aiService'; // Updated import
 import { SEO } from '../components/ui/SEO';
 import { CheckpointModal } from '../components/editor/CheckpointModal';
 import { 
@@ -350,7 +350,7 @@ const Editor: React.FC = () => {
       };
       updateMessageInState(aiMsg.session_id, { ...aiMsg, ...thinkingUpdate });
 
-      const streamResponse = await generateCodeStream( prompt, project.files, activeFile, attachments, model, signal );
+      const streamResponse = await generateResponseStream( prompt, project.files, activeFile, attachments, model, signal );
       let fullText = '';
       let sources = new Map<string, string>();
       
@@ -359,7 +359,7 @@ const Editor: React.FC = () => {
 
         fullText += chunk.text || "";
 
-        const groundingChunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        const groundingChunks = (chunk as any).candidates?.[0]?.groundingMetadata?.groundingChunks;
         if (groundingChunks) {
           for (const g_chunk of groundingChunks) {
             if (g_chunk.web) {
@@ -990,12 +990,13 @@ const Editor: React.FC = () => {
 
           {((!isMobile && showPreview) || (isMobile && mobileTab === 'preview')) && (
             <div className={`bg-sidebar border-l border-border h-full flex flex-col transition-colors duration-300 ${isMobile ? 'w-full absolute inset-0 z-10' : 'md:w-2/5 lg:w-1/3 shrink-0 relative'}`}>
-              {isMobile && <div className="h-9 flex items-center justify-between px-2 bg-[#1e1e1e] border-b border-[#333] shrink-0"><span className="text-xs font-bold text-gray-400 uppercase">Preview</span><button onClick={() => setMobileTab('editor')}><X className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-400"/></button></div>}
               <Preview 
                 files={project.files} 
                 refreshTrigger={refreshTrigger} 
                 previewEntryPath={previewEntryPath}
                 onNavigate={setPreviewEntryPath}
+                isMobile={isMobile}
+                onClose={() => setMobileTab('editor')}
               />
             </div>
           )}

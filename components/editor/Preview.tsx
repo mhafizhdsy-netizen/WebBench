@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { File } from '../../types';
-import { RefreshCw, Monitor, Smartphone, Tablet, AlertTriangle, Code, Trash2, ChevronUp } from 'lucide-react';
+import { RefreshCw, Monitor, Smartphone, Tablet, AlertTriangle, Code, Trash2, ChevronUp, X } from 'lucide-react';
 import { WebBenchLoader } from '../ui/Loader';
 
 interface PreviewProps {
@@ -8,6 +8,8 @@ interface PreviewProps {
   refreshTrigger: number;
   previewEntryPath: string;
   onNavigate: (path: string) => void;
+  isMobile?: boolean;
+  onClose?: () => void;
 }
 
 type LogLevel = 'log' | 'warn' | 'error';
@@ -118,7 +120,7 @@ window.onerror = (message, source, lineno, colno, error) => {
 `;
 
 
-export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger, previewEntryPath, onNavigate }) => {
+export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger, previewEntryPath, onNavigate, isMobile, onClose }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [size, setSize] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [loading, setLoading] = useState(false);
@@ -318,6 +320,15 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger, preview
           >
             <RefreshCw className={`w-3.5 h-3.5 md:w-4 md:h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
+          {isMobile && onClose && (
+            <button 
+              onClick={onClose} 
+              className="p-1 text-gray-400 hover:text-white"
+              title="Close Preview"
+            >
+              <X className="w-3.5 h-3.5 md:w-4 md:h-4" />
+            </button>
+          )}
         </div>
       </div>
       <div className="flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar relative">

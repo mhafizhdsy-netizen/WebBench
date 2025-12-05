@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { File, ChatMessage, ChatSession, FileAction } from '../../types';
 import { Button } from '../ui/Button';
-import { generateSuggestions } from '../../services/geminiService';
-import { Send, Sparkles, X, Bot, User as UserIcon, ArrowDown, Loader2, Lightbulb, RefreshCw, ChevronRight, Paperclip, FileText, Cpu, CheckCircle2, LinkIcon, History, Plus, ChevronDown, Square, Trash2, MoreVertical, AlertTriangle, Edit, XCircle } from 'lucide-react';
+import { generateSuggestions } from '../../services/aiService'; // Updated import
+import { Send, Sparkles, X, Bot, User as UserIcon, ArrowDown, Loader2, Lightbulb, RefreshCw, ChevronRight, Paperclip, FileText, Cpu, CheckCircle2, LinkIcon, History, Plus, ChevronDown, Square, Trash2, MoreVertical, AlertTriangle, Edit, XCircle, BrainCircuit, CodeXml } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -103,15 +103,16 @@ interface Attachment {
   dataUrl: string; // data URL
 }
 
-type ModelName = 'gemini-flash-lite-latest' | 'gemini-2.5-flash' | 'gemini-3-pro-preview';
-
-const MODEL_CYCLE: ModelName[] = ['gemini-flash-lite-latest', 'gemini-2.5-flash', 'gemini-3-pro-preview'];
+type ModelName = 'gemini-2.5-flash' | 'gemini-3-pro-preview' | 'glm-4.5-air' | 'deepseek-r1-0528';
 
 const MODEL_CONFIG: Record<ModelName, { name: string; description: string; icon: React.FC<any> }> = {
-    'gemini-flash-lite-latest': { name: 'Fast', description: 'Quick responses for simple tasks.', icon: Sparkles },
-    'gemini-2.5-flash': { name: 'Balanced', description: 'Good balance of speed and capability.', icon: Cpu },
-    'gemini-3-pro-preview': { name: 'Advanced', description: 'Slower, but best for complex requests.', icon: Cpu }
+    'gemini-2.5-flash': { name: 'Gemini Flash', description: 'Google - Good balance of speed and capability.', icon: Sparkles },
+    'gemini-3-pro-preview': { name: 'Gemini 3 Pro', description: 'Google - Slower, but best for complex requests.', icon: Cpu },
+    'glm-4.5-air': { name: 'GLM-4.5 Air', description: 'Zhipu AI - Newest high-performance model.', icon: BrainCircuit },
+    'deepseek-r1-0528': { name: 'DeepSeek R1', description: 'A powerful and general model from DeepSeek AI.', icon: CodeXml }
 };
+
+const MODEL_CYCLE: ModelName[] = ['gemini-2.5-flash', 'gemini-3-pro-preview', 'glm-4.5-air', 'deepseek-r1-0528'];
 
 interface ChatMessageItemProps {
   message: ChatMessage;
