@@ -209,6 +209,17 @@ export const Preview: React.FC<PreviewProps> = ({
     if (!htmlFile) return '<h1>No index.html found</h1>';
     let content = htmlFile.content;
     const regex = /(href|src)=["'](?!\w+:\/\/)(?!#)([^"']+)["']/g;
+    
+    // Helper to safe encode text to Base64
+    const toBase64 = (str: string) => {
+        try {
+            return btoa(unescape(encodeURIComponent(str)));
+        } catch (e) {
+            console.error("Base64 encode failed", e);
+            return "";
+        }
+    };
+
     content = content.replace(regex, (match, attr, path) => {
         const fullPath = new URL(path, `file://${entryPath}`).pathname;
         const file = project.files[fullPath];
@@ -217,8 +228,23 @@ export const Preview: React.FC<PreviewProps> = ({
         if (file.type === 'html') return match;
 
         const mimeType = getMimeType(file.type);
-        const blob = new Blob([file.content], { type: mimeType });
-        return `${attr}="${URL.createObjectURL(blob)}"`;
+        
+        // Use Data URIs instead of Blob URLs.
+        // This avoids "Not allowed to load local resource" errors in sandboxed iframes
+        // and ensures assets load reliably without depending on origin policies.
+        let base64Content = "";
+        
+        if (file.type === 'image') {
+             // If image is already base64 (e.g. from zip import), use it directly.
+             // If it was created as text in the editor, this might need handling, 
+             // but for now we assume content is valid for the type.
+             base64Content = file.content;
+        } else {
+             // For text-based files (CSS, JS), encode to base64
+             base64Content = toBase64(file.content);
+        }
+        
+        return `${attr}="data:${mimeType};base64,${base64Content}"`;
     });
 
     // Inject interceptor at the start of HEAD to catch early logs and errors
@@ -325,7 +351,7 @@ export const Preview: React.FC<PreviewProps> = ({
       <div className="flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar relative">
         {loading && <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/50"><WebBenchLoader size="md"/></div>}
         <div className={`transition-all duration-300 overflow-hidden relative z-10 shrink-0 ${getDeviceClasses()}`}>
-          <iframe ref={iframeRef} title="preview" className={`w-full h-full border-none bg-white ${size === 'desktop' ? 'rounded-lg' : 'rounded-sm'}`} sandbox="allow-scripts allow-forms allow-popups allow-modals" />
+          <iframe ref={iframeRef} title="preview" className={`w-full h-full border-none bg-white ${size === 'desktop' ? 'rounded-lg' : 'rounded-sm'}`} sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" />
         </div>
       </div>
     );

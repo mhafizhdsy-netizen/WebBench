@@ -209,14 +209,16 @@ const SharePage: React.FC = () => {
             <SEO title={`${project.name} | Overview`} description={`View details for ${project.name}.`} />
             
             {/* 
-                Main Container:
-                - min-h-screen: Ensures full height
-                - overflow-y-auto: Enables PARENT scrolling
-                - no-scrollbar: Hides the bar but keeps functionality
+                Main Container Fix:
+                - h-[100dvh]: Forces fixed viewport height (Dynamic Viewport Height for mobile).
+                - w-full: Full width.
+                - overflow-y-auto: Enables internal scrolling on this container.
+                - no-scrollbar: Hides the visual scrollbar but keeps functionality.
+                - bg-[#1e1e1e]: Ensures background covers the whole "scrollable" area.
             */}
-            <div className="min-h-screen w-full bg-[#1e1e1e] text-[#cccccc] font-sans overflow-y-auto no-scrollbar selection:bg-accent/30 selection:text-white">
+            <div className="h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] font-sans overflow-y-auto no-scrollbar selection:bg-accent/30 selection:text-white">
                 
-                {/* Navbar */}
+                {/* Navbar - Sticky ensures it stays at top of the scroll container */}
                 <header className="sticky top-0 z-50 w-full bg-[#1e1e1e]/80 backdrop-blur-md border-b border-[#3e3e42]">
                     <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
                         <Link to="/dashboard" className="flex items-center gap-2 group">
@@ -234,7 +236,7 @@ const SharePage: React.FC = () => {
                     </div>
                 </header>
 
-                <main className="max-w-6xl mx-auto px-4 py-8 md:py-12">
+                <main className="max-w-6xl mx-auto px-4 py-8 md:py-12 pb-20">
                     
                     {/* Header Section */}
                     <div className="mb-10 flex flex-col md:flex-row md:items-start md:justify-between gap-6">

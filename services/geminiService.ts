@@ -38,47 +38,65 @@ SETIAP blok kode \`html\`, \`css\`, \`js\`, \`ts\`, atau \`tsx\` **HARUS** diawa
 ...kode anda...
 \`\`\`
 
-**Contoh Benar:**
-\`\`\`html
-<!-- /index.html -->
-<!DOCTYPE html>
-<html>...</html>
-\`\`\`
-
-\`\`\`css
-/* /assets/css/style.css */
-body { background: #000; }
-\`\`\`
-
-\`\`\`javascript
-// /assets/js/app.js
-console.log('Hello');
-\`\`\`
-
 ## 2. FORMAT FINAL JSON (FILE OPERATIONS)
-Di BAGIAN PALING AKHIR respons (setelah semua penjelasan dan blok kode), Anda **WAJIB** menyertakan satu blok kode \`json\` berisi daftar file yang dibuat/diubah/dihapus.
-
-**Format JSON:**
+Di BAGIAN PALING AKHIR respons, sertakan blok JSON raw:
 \`\`\`json
 {
   "files": [
-    {
-      "action": "create", // atau "update", "delete"
-      "path": "/index.html",
-      "type": "html",
-      "content": "<!DOCTYPE html>..."
-    },
-    {
-      "action": "update",
-      "path": "/assets/css/style.css",
-      "type": "css",
-      "content": "body { ... }"
-    }
+    { "action": "create", "path": "/index.html", "type": "html", "content": "..." }
   ]
 }
 \`\`\`
 
-**JANGAN** memberikan penjelasan apapun setelah blok JSON ini. Ini harus menjadi hal terakhir dalam respons Anda.
+---
+
+# 🖼️ IMAGE ASSETS & PLACEHOLDERS STRATEGY (20+ SOURCES)
+
+Jangan pernah membuat path lokal palsu (seperti \`images/hero.jpg\`) kecuali file itu benar-benar ada. Gunakan **External URL** dari daftar di bawah ini.
+Pilih sumber yang paling **RELEVAN** dengan konteks website.
+
+## A. CONTEXTUAL & PHOTOGRAPHY (Gunakan untuk hasil akhir yang cantik)
+Gunakan ini jika user meminta website spesifik (Travel, Food, Tech, dll). Ganti \`{keyword}\` dengan topik yang relevan.
+
+1. **Lorem Flickr (Paling Direkomendasikan):** \`https://loremflickr.com/{width}/{height}/{keyword1},{keyword2}\`
+   *   *Contoh Coffee Shop:* \`https://loremflickr.com/800/600/coffee,barista\`
+   *   *Contoh Tech:* \`https://loremflickr.com/800/600/computer,code\`
+2. **Picsum Photos (Artistik/Random):** \`https://picsum.photos/{width}/{height}?random={unique_id}\`
+3. **Unsplash Source (Alternative):** \`https://images.unsplash.com/photo-{id}?w={width}&h={height}&fit=crop\` (Gunakan ID foto nyata jika tahu, atau gunakan Lorem Flickr untuk pencarian keyword).
+4. **PlaceImg:** \`https://placeimg.com/{width}/{height}/arch\` (arch, animals, nature, people, tech).
+
+## B. WIREFRAMING & STRUCTURE (Gunakan untuk layout awal)
+Gunakan ini jika user meminta "layout", "wireframe", atau "struktur".
+
+5. **Placehold.co (Modern):** \`https://placehold.co/{width}x{height}/{bg_color}/{text_color}?text={text}\`
+   *   *Contoh:* \`https://placehold.co/600x400/1e293b/ffffff?text=Hero+Image\`
+6. **DummyImage:** \`https://dummyimage.com/{width}x{height}/000/fff\`
+7. **FakeImg:** \`https://fakeimg.pl/{width}x{height}/?text={text}&font=lobster\`
+8. **Via Placeholder:** \`https://via.placeholder.com/{width}x{height}\`
+
+## C. AVATARS & USERS (Gunakan untuk Testimonial, Profile, Team)
+9. **UI Avatars (Text Initials):** \`https://ui-avatars.com/api/?name={Name}+Surname&background=random\`
+10. **DiceBear (Vector/Fun):** \`https://api.dicebear.com/7.x/avataaars/svg?seed={name}\`
+    *   Styles: \`avataaars\`, \`bottts\`, \`adventurer\`, \`lorelei\`, \`micah\`.
+11. **RoboHash (Robots):** \`https://robohash.org/{text}?set=set1\`
+12. **Gravatar (Default):** \`https://www.gravatar.com/avatar/{hash}?d=identicon\`
+13. **Joeschmoe:** \`https://joeschmoe.io/api/v1/{gender}/{name}\`
+
+## D. NICHE / FUN (Gunakan hanya jika diminta spesifik)
+14. **PlaceKitten (Kucing):** \`https://placekitten.com/{width}/{height}\`
+15. **PlaceDog (Anjing):** \`https://placedog.net/{width}/{height}\`
+16. **PlaceBear (Beruang):** \`https://placebear.com/{width}/{height}\`
+17. **FillMurray (Bill Murray):** \`https://www.fillmurray.com/{width}/{height}\`
+18. **StevenSegallery:** \`https://www.stevensegallery.com/{width}/{height}\`
+19. **PlaceKeanu:** \`https://placekeanu.com/{width}/{height}\`
+20. **PlaceCage:** \`https://www.placecage.com/{width}/{height}\`
+21. **BaconMockup (Daging):** \`https://baconmockup.com/{width}/{height}\`
+
+## ⚠️ IMAGE RULES (AGAR TIDAK BERANTAKAN)
+1. **ASPECT RATIO:** Pastikan \`{width}\` dan \`{height}\` di URL sesuai dengan rasio container CSS. Jangan taruh gambar 200x200 di banner lebar 1200px.
+2. **OBJECT-FIT:** Selalu gunakan class \`object-cover\` (Tailwind) atau \`object-fit: cover\` (CSS) pada tag \`<img>\` agar gambar tidak gepeng/stretching.
+3. **RELEVANSI:** Jika website tentang "Gym", JANGAN pakai gambar "Kucing". Gunakan \`loremflickr.com/../gym,fitness\`.
+4. **KONTRAS:** Untuk Wireframe, gunakan warna background gelap dan teks terang agar mudah dibaca (\`placehold.co/600x400/222/fff\`).
 
 ---
 
@@ -115,15 +133,6 @@ Gunakan **GSAP** (via CDN) atau CSS Transitions untuk interaksi.
 - Hover states pada tombol/kartu.
 - Fade-in saat load.
 - Smooth scroll (Lenis).
-
----
-
-# REFERENSI LIBRARY (CDN)
-Gunakan URL CDN berikut jika diperlukan:
-- Tailwind: \`<script src="https://cdn.tailwindcss.com"></script>\`
-- GSAP: \`https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js\`
-- FontAwesome: \`<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">\`
-- Google Fonts: (Inter, Outfit, Space Grotesk)
 `;
 
 export const generateCodeStream = async (
@@ -163,6 +172,7 @@ export const generateCodeStream = async (
     1. Start every code block with a comment containing the file path (e.g., \`<!-- /index.html -->\`).
     2. End your response with the JSON block containing file actions.
     3. Use the specified Design System (colors, spacing, typography).
+    4. **IMAGES:** Use the provided PLACEHOLDER STRATEGY. Pick relevant images (e.g., use 'loremflickr.com/.../car' for a car website). Ensure dimensions are correct.
     ---
   `;
 
