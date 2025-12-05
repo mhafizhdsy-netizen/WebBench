@@ -4,11 +4,12 @@ import { projectService } from '../services/projectService';
 import { Project, File } from '../types';
 import { Button } from '../components/ui/Button';
 import { CreateProjectModal } from '../components/dashboard/CreateProjectModal';
+import { ShareModal } from '../components/dashboard/ShareModal';
 import { ActionModal, ActionModalConfig } from '../components/dashboard/ActionModal';
 import { SettingsModal } from '../components/dashboard/SettingsModal';
 import { WebBenchLoader } from '../components/ui/Loader';
 import { SEO } from '../components/ui/SEO';
-import { Plus, FolderOpen, LogOut, Search, Clock, Trash2, Upload, Code2, Settings, LayoutTemplate, Box, GitBranch, Database, Cpu, Layers, MoreVertical, Edit, Copy, AlertCircle, X } from 'lucide-react';
+import { Plus, FolderOpen, LogOut, Search, Clock, Trash2, Upload, Code2, Settings, LayoutTemplate, Box, GitBranch, Database, Cpu, Layers, MoreVertical, Edit, Copy, AlertCircle, X, Share2, BrainCircuit, Server, Terminal } from 'lucide-react';
 import JSZip from 'jszip';
 
 // New Logo Component
@@ -20,16 +21,18 @@ const WebBenchLogo = ({ className = "w-8 h-8" }) => (
   </svg>
 );
 
-// Array of icons for projects
-const ProjectIcons = [
-  Code2,
-  LayoutTemplate,
-  Box,
-  GitBranch,
-  Database,
-  Cpu,
-  Layers
-];
+// Map project types to icons
+const ProjectIconMap: Record<string, React.FC<any>> = {
+    'starter': Code2,
+    'react-vite': BrainCircuit,
+    'nextjs': Server,
+    'laravel': Database,
+    'python': Code2,
+    'php': Code2,
+    'cpp': Terminal,
+    'blank': Layers,
+    'default': Box
+};
 
 
 const Dashboard: React.FC = () => {
@@ -42,6 +45,8 @@ const Dashboard: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [modalConfig, setModalConfig] = useState<ActionModalConfig | null>(null);
   const [activeContextMenu, setActiveContextMenu] = useState<string | null>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ top: number, right: number } | null>(null);
+  const [shareModalProject, setShareModalProject] = useState<Project | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -61,6 +66,12 @@ const Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
+    // Handle post-OAuth redirect
+    const redirectPath = localStorage.getItem('redirect_path');
+    if (redirectPath) {
+      localStorage.removeItem('redirect_path');
+      navigate(redirectPath, { replace: true });
+    }
     fetchProjects();
   }, []);
 
@@ -68,17 +79,29 @@ const Dashboard: React.FC = () => {
     const handleClickOutside = (event: MouseEvent) => {
       if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
         setActiveContextMenu(null);
+        setContextMenuPosition(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleCreateProject = async (name: string, template: 'blank' | 'starter') => {
+  const toggleContextMenu = (e: React.MouseEvent, projectId: string) => {
+    e.stopPropagation();
+    if (activeContextMenu === projectId) {
+      setActiveContextMenu(null);
+      setContextMenuPosition(null);
+    } else {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setActiveContextMenu(projectId);
+      setContextMenuPosition({ top: rect.bottom + 5, right: window.innerWidth - rect.right });
+    }
+  };
+
+  const handleCreateProject = async (name: string, template: Project['type']) => {
     try {
       setError(null);
-      const files = template === 'blank' ? {} : undefined;
-      const newProject = await projectService.createProject(name, files);
+      const newProject = await projectService.createProject(name, template);
       navigate(`/editor/${newProject.id}`);
     } catch (err: any) {
       setError(err.message);
@@ -130,7 +153,8 @@ const Dashboard: React.FC = () => {
       await Promise.all(promises);
 
       const projectName = file.name.replace(/\.zip$/i, "") || "Imported Project";
-      const newProject = await projectService.createProject(projectName, importedFiles);
+      const newProject = await projectService.createProject(projectName, 'blank'); // Imported projects are type 'blank'
+      await projectService.updateProject(newProject.id, { files: importedFiles });
       navigate(`/editor/${newProject.id}`);
 
     } catch (err: any) {
@@ -154,7 +178,8 @@ const Dashboard: React.FC = () => {
           break;
         case 'duplicate':
           if (value) {
-            const newProject = await projectService.createProject(value, config.project.files);
+            const newProject = await projectService.createProject(value, config.project.type);
+            await projectService.updateProject(newProject.id, { files: config.project.files });
             setProjects([newProject, ...projects]);
           }
           break;
@@ -182,15 +207,9 @@ const Dashboard: React.FC = () => {
     p.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const getProjectIcon = (projectId: string) => {
-    let hash = 0;
-    for (let i = 0; i < projectId.length; i++) {
-        const char = projectId.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash |= 0;
-    }
-    const iconIndex = Math.abs(hash) % ProjectIcons.length;
-    return React.createElement(ProjectIcons[iconIndex], { className: "text-accent w-6 h-6 md:w-7 md:h-7" });
+  const getProjectIcon = (projectType: Project['type']) => {
+    const Icon = ProjectIconMap[projectType || 'default'] || ProjectIconMap['default'];
+    return <Icon className="text-accent w-6 h-6 md:w-7 md:h-7" />;
   };
 
   return (
@@ -200,6 +219,25 @@ const Dashboard: React.FC = () => {
         description="Manage all your web development projects in one place. Create new projects, import from a zip, and access your AI-powered editor."
         keywords="web projects, dashboard, AI web builder, frontend development, new project"
       />
+
+      {activeContextMenu && contextMenuPosition && (() => {
+          const project = projects.find(p => p.id === activeContextMenu);
+          if (!project) return null;
+          return (
+            <div 
+              ref={contextMenuRef} 
+              style={{ top: `${contextMenuPosition.top}px`, right: `${contextMenuPosition.right}px` }}
+              className="fixed z-30 w-36 md:w-40 bg-[#2d2d30] border border-border rounded-lg shadow-2xl py-1 animate-in fade-in zoom-in-95"
+            >
+                <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'rename', project }); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Edit className="w-3 h-3 md:w-3.5 md:h-3.5"/>Rename</button>
+                <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'duplicate', project }); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Copy className="w-3 h-3 md:w-3.5 md:h-3.5"/>Duplicate</button>
+                <button onClick={(e) => { e.stopPropagation(); setShareModalProject(project); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Share2 className="w-3 h-3 md:w-3.5 md:h-3.5"/>Share</button>
+                <div className="my-1 h-px bg-border mx-1"></div>
+                <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'delete', project }); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-red-400 hover:bg-red-500/20 transition-colors"><Trash2 className="w-3 h-3 md:w-3.5 md:h-3.5"/>Delete</button>
+            </div>
+          )
+      })()}
+
       <div className="min-h-screen bg-background text-gray-300">
         <input 
           type="file" 
@@ -220,6 +258,12 @@ const Dashboard: React.FC = () => {
           config={modalConfig}
           onClose={() => setModalConfig(null)}
           onConfirm={handleConfirmAction}
+        />
+
+        <ShareModal
+            isOpen={!!shareModalProject}
+            onClose={() => setShareModalProject(null)}
+            project={shareModalProject}
         />
 
         <SettingsModal 
@@ -304,28 +348,19 @@ const Dashboard: React.FC = () => {
                 <div 
                   key={project.id}
                   onClick={() => navigate(`/editor/${project.id}`)}
-                  className="bg-sidebar border border-border rounded-xl p-4 md:p-5 hover:border-accent hover:shadow-xl hover:shadow-black/20 cursor-pointer group transition-all duration-300 relative overflow-hidden"
+                  className="bg-sidebar border border-border rounded-xl p-4 md:p-5 hover:border-accent hover:shadow-xl hover:shadow-black/20 cursor-pointer group transition-all duration-300 relative"
                 >
                   <button 
-                      onClick={(e) => { e.stopPropagation(); setActiveContextMenu(activeContextMenu === project.id ? null : project.id); }}
+                      onClick={(e) => toggleContextMenu(e, project.id)}
                       className="absolute top-2 right-2 md:top-3 md:right-3 p-1.5 md:p-2 bg-background/50 hover:bg-active rounded-full text-gray-400 hover:text-white transition-colors backdrop-blur-sm z-10"
                       aria-label="Project options"
                     >
                       <MoreVertical className="w-3.5 h-3.5 md:w-4 md:h-4" />
                     </button>
 
-                  {activeContextMenu === project.id && (
-                      <div ref={contextMenuRef} className="absolute top-10 right-2 md:top-12 md:right-3 z-20 w-36 md:w-40 bg-[#2d2d30] border border-border rounded-lg shadow-2xl py-1 animate-in fade-in zoom-in-95">
-                        <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'rename', project }); setActiveContextMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Edit className="w-3 h-3 md:w-3.5 md:h-3.5"/>Rename</button>
-                        <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'duplicate', project }); setActiveContextMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Copy className="w-3 h-3 md:w-3.5 md:h-3.5"/>Duplicate</button>
-                        <div className="my-1 h-px bg-border mx-1"></div>
-                        <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'delete', project }); setActiveContextMenu(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-red-400 hover:bg-red-500/20 transition-colors"><Trash2 className="w-3 h-3 md:w-3.5 md:h-3.5"/>Delete</button>
-                      </div>
-                    )}
-
                   <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
                     <div className="w-12 h-12 md:w-14 md:h-14 rounded-lg bg-gradient-to-br from-active to-background flex items-center justify-center border border-white/5 shadow-inner group-hover:scale-105 transition-transform duration-300">
-                      {getProjectIcon(project.id)}
+                      {getProjectIcon(project.type)}
                     </div>
                     <div className="overflow-hidden">
                       <h3 className="text-base font-semibold text-white truncate group-hover:text-accent transition-colors md:text-lg">{project.name}</h3>

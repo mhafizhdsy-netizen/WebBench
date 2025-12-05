@@ -95,9 +95,13 @@ const Editor: React.FC = () => {
         return;
       }
       setProject(p);
-      const initialFile = p.files['/index.html'] ? '/index.html' : Object.keys(p.files)[0];
+      const initialFile = p.files['/index.html'] || p.files['/src/main.tsx'] || p.files['/app/page.tsx'] || p.files['/main.py'] || p.files['/index.php'] || Object.keys(p.files)[0];
+
       if (initialFile) {
-        handleFileSelect(initialFile);
+        // FIX: The `initialFile` can be a string (from Object.keys) or a File object.
+        // This handles both cases to correctly extract the file path.
+        const path = typeof initialFile === 'string' ? initialFile : initialFile.path;
+        handleFileSelect(path);
         setPreviewEntryPath(p.files['/index.html'] ? '/index.html' : '/');
       }
 
@@ -634,9 +638,15 @@ const Editor: React.FC = () => {
       updatedFiles[fullPath] = { path: fullPath, name: '.keep', content: '', type: 'markdown', lastModified: Date.now() };
     } else {
       const name = path.split('/').pop() || 'new-file';
-      const ext = name.split('.').pop();
+      const ext = name.split('.').pop() || '';
       let type: ProjectFile['type'] = 'html';
-      if(ext === 'css') type = 'css'; else if(ext === 'js') type = 'javascript'; else if(ext === 'json') type = 'json';
+      if(ext === 'css') type = 'css'; 
+      else if(ext === 'js') type = 'javascript';
+      else if(ext === 'ts' || ext === 'tsx') type = 'typescript';
+      else if(ext === 'py') type = 'python';
+      else if(ext === 'php') type = 'php';
+      else if(ext === 'cpp' || ext === 'h') type = 'cpp';
+      else if(ext === 'json') type = 'json';
       updatedFiles[path] = { path, name, content: '', type, lastModified: Date.now() };
       handleFileSelect(path);
     }
@@ -991,7 +1001,7 @@ const Editor: React.FC = () => {
           {((!isMobile && showPreview) || (isMobile && mobileTab === 'preview')) && (
             <div className={`bg-sidebar border-l border-border h-full flex flex-col transition-colors duration-300 ${isMobile ? 'w-full absolute inset-0 z-10' : 'md:w-2/5 lg:w-1/3 shrink-0 relative'}`}>
               <Preview 
-                files={project.files} 
+                project={project}
                 refreshTrigger={refreshTrigger} 
                 previewEntryPath={previewEntryPath}
                 onNavigate={setPreviewEntryPath}

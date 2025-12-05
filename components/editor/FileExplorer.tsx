@@ -4,7 +4,7 @@ import { Button } from '../ui/Button';
 import { 
   Folder, FolderOpen, FileCode, FileJson, FileType, ChevronRight, ChevronDown, 
   FilePlus, FolderPlus, Trash2, Edit2, Copy, X, Loader2, Search,
-  FileImage, FileText, MoreVertical
+  FileImage, FileText, MoreVertical, Terminal, Database, BrainCircuit
 } from 'lucide-react';
 
 // --- Helper Components ---
@@ -14,6 +14,11 @@ const FileIcon = ({ type }: { type: string }) => {
     case 'html': return <FileCode className="w-3.5 h-3.5 md:w-4 md:h-4 text-orange-400" />;
     case 'css': return <FileCode className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400" />;
     case 'javascript': return <FileCode className="w-3.5 h-3.5 md:w-4 md:h-4 text-yellow-400" />;
+    case 'typescript': return <BrainCircuit className="w-3.5 h-3.5 md:w-4 md:h-4 text-blue-400" />;
+    case 'tsx': return <BrainCircuit className="w-3.5 h-3.5 md:w-4 md:h-4 text-blue-400" />;
+    case 'python': return <FileCode className="w-3.5 h-3.5 md:w-4 md:h-4 text-green-400" />;
+    case 'php': return <Database className="w-3.5 h-3.5 md:w-4 md:h-4 text-indigo-400" />;
+    case 'cpp': return <Terminal className="w-3.5 h-3.5 md:w-4 md:h-4 text-cyan-400" />;
     case 'json': return <FileJson className="w-3.5 h-3.5 md:w-4 md:h-4 text-lime-400" />;
     case 'markdown': return <FileText className="w-3.5 h-3.5 md:w-4 md:h-4 text-indigo-400" />;
     case 'image': return <FileImage className="w-3.5 h-3.5 md:w-4 md:h-4 text-rose-400" />;

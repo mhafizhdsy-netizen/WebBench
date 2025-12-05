@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { File } from '../../types';
-import { RefreshCw, Monitor, Smartphone, Tablet, AlertTriangle, Code, Trash2, ChevronUp, X } from 'lucide-react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { Project, File } from '../../types';
+import { RefreshCw, Monitor, Smartphone, Tablet, AlertTriangle, Code, Trash2, X, Terminal, Copy, Check, Server, Loader2 } from 'lucide-react';
 import { WebBenchLoader } from '../ui/Loader';
+import { WebContainer } from '@webcontainer/api';
 
 interface PreviewProps {
-  files: Record<string, File>;
+  project: Project;
   refreshTrigger: number;
   previewEntryPath: string;
   onNavigate: (path: string) => void;
@@ -19,359 +20,351 @@ interface LogEntry {
   timestamp: number;
 }
 
+type ContainerStatus = 'idle' | 'booting' | 'mounting' | 'installing' | 'starting' | 'running' | 'error';
+const statusMessages: Record<ContainerStatus, string> = {
+    idle: 'Idle',
+    booting: 'Booting WebContainer...',
+    mounting: 'Writing files to virtual disk...',
+    installing: 'Installing dependencies (npm install)...',
+    starting: 'Starting dev server (npm run dev)...',
+    running: 'Server is live!',
+    error: 'An error occurred.',
+};
+
 const navigationAndConsoleInterceptorScript = `
-function resolvePath(base, relative) {
-    // If the path is already absolute, or an external link, return it as is.
-    // The click handler already checks for http, but this is a safeguard.
-    if (relative.startsWith('/') || relative.startsWith('http')) {
-        return relative;
-    }
-
-    // Get the directory of the base path. E.g., for '/pages/about.html', this is '/pages'
-    const baseDir = base.substring(0, base.lastIndexOf('/'));
-    const stack = baseDir.split('/').filter(p => p); // E.g., ['pages']
-    const parts = relative.split('/');
-
-    for (const part of parts) {
-        if (part === '.' || part === '') continue; // Ignore './' and empty parts from '//'
-        if (part === '..') {
-            stack.pop(); // Go up one level
-        } else {
-            stack.push(part); // Go down into a directory or add filename
-        }
-    }
-    return '/' + stack.join('/');
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  const CURRENT_PATH = '%%CURRENT_PATH%%';
-
-  document.body.addEventListener('click', (e) => {
-    let target = e.target;
-    // Traverse up the DOM to find an anchor tag
-    while (target && target.tagName !== 'A') {
-      target = target.parentElement;
-    }
-
-    if (target && target.tagName === 'A') {
-      const anchor = target;
-      const href = anchor.getAttribute('href');
-
-      // Intercept relative local links
-      if (href && !href.startsWith('#') && !href.startsWith('http')) {
-        e.preventDefault();
-        const absolutePath = resolvePath(CURRENT_PATH, href);
-        window.parent.postMessage({ type: 'navigate', path: absolutePath }, '*');
-      }
-    }
-  });
-});
-
-
-// --- Console Interceptor ---
-const originalConsole = {
-  log: console.log.bind(console),
-  warn: console.warn.bind(console),
-  error: console.error.bind(console)
-};
-
-const sendLog = (level, args) => {
-  try {
-    // Basic serialization for complex objects
-    const serializedArgs = args.map(arg => {
-      if (arg instanceof Error) {
-        return { __error: true, message: arg.message, stack: arg.stack };
-      }
-      if (typeof arg === 'object' && arg !== null) {
-        try {
-          return JSON.parse(JSON.stringify(arg));
-        } catch(e) {
-          return arg.toString();
-        }
-      }
-      return arg;
+    const originalConsole = { ...window.console };
+    const levels = ['log', 'warn', 'error', 'info', 'debug'];
+    levels.forEach(level => {
+        window.console[level] = (...args) => {
+            originalConsole[level](...args);
+            const serializedArgs = args.map(arg => {
+                try {
+                    return JSON.stringify(arg);
+                } catch (e) { return 'Unserializable Object'; }
+            });
+            window.parent.postMessage({ type: 'console', level, message: serializedArgs }, '*');
+        };
     });
-    window.parent.postMessage({ type: 'console', level, message: serializedArgs }, '*');
-  } catch(e) {
-    originalConsole.error('Error posting log to parent:', e);
-  }
-};
-
-console.log = (...args) => {
-  originalConsole.log(...args);
-  sendLog('log', args);
-};
-console.warn = (...args) => {
-  originalConsole.warn(...args);
-  sendLog('warn', args);
-};
-console.error = (...args) => {
-  originalConsole.error(...args);
-  sendLog('error', args);
-};
-
-window.onerror = (message, source, lineno, colno, error) => {
-  const errorArgs = [message, 'at', \`\${source}:\${lineno}:\${colno}\`];
-  if(error) {
-    errorArgs.push(error.stack);
-  }
-  sendLog('error', errorArgs);
-};
+    window.addEventListener('error', (e) => {
+      window.parent.postMessage({ type: 'console', level: 'error', message: [e.message] }, '*');
+    });
+    document.addEventListener('click', (e) => {
+        let target = e.target;
+        while (target && target.tagName !== 'A') { target = target.parentElement; }
+        if (target && target.tagName === 'A') {
+            const href = target.getAttribute('href');
+            if (href && !href.startsWith('http') && !href.startsWith('#')) {
+                e.preventDefault();
+                const currentPath = '%%CURRENT_PATH%%';
+                const currentDir = currentPath.substring(0, currentPath.lastIndexOf('/'));
+                const newPath = new URL(href, 'file://' + currentDir + '/').pathname;
+                window.parent.postMessage({ type: 'navigate', path: newPath }, '*');
+            }
+        }
+    }, true);
 `;
 
+const InstructionView = ({ projectType }: { projectType: Project['type'] }) => {
+    const [copyStatus, setCopyStatus] = useState<Record<string, boolean>>({});
 
-export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger, previewEntryPath, onNavigate, isMobile, onClose }) => {
+    const handleCopy = (command: string, id: string) => {
+        navigator.clipboard.writeText(command);
+        setCopyStatus(prev => ({ ...prev, [id]: true }));
+        setTimeout(() => setCopyStatus(prev => ({ ...prev, [id]: false })), 2000);
+    };
+
+    const getInstructions = () => {
+        switch (projectType) {
+            case 'laravel': return {
+                title: 'Laravel Project',
+                steps: [
+                    { command: 'composer install', description: 'Install PHP dependencies.' },
+                    { command: 'php artisan serve', description: 'Start the development server.' }
+                ]
+            };
+            case 'python': return {
+                title: 'Python Project',
+                steps: [{ command: 'python main.py', description: 'Execute the Python script.' }]
+            };
+            case 'php': return {
+                title: 'PHP Project',
+                steps: [{ command: 'php -S localhost:8000', description: 'Start the built-in PHP server.' }]
+            };
+            case 'cpp': return {
+                title: 'C++ Project',
+                steps: [
+                    { command: 'g++ main.cpp -o main', description: 'Compile the source code.' },
+                    { command: './main', description: 'Run the compiled executable.' }
+                ]
+            };
+            default: return null;
+        }
+    };
+
+    const instructions = getInstructions();
+    if (!instructions) return null;
+
+    return (
+        <div className="h-full flex flex-col items-center justify-center bg-background text-gray-300 p-4 text-center">
+            <Terminal className="w-12 h-12 text-accent mb-4" />
+            <h3 className="text-xl font-bold text-white mb-2">{instructions.title}</h3>
+            <p className="text-sm text-gray-500 mb-6">This project type runs locally. Follow these steps in your terminal:</p>
+            <div className="w-full max-w-md space-y-3">
+                {instructions.steps.map((step, index) => (
+                    <div key={index} className="text-left">
+                        <p className="text-xs text-gray-400 mb-1 ml-1">{index + 1}. {step.description}</p>
+                        <div className="flex items-center gap-2 bg-sidebar p-3 rounded-lg border border-border">
+                            <span className="text-green-400 font-mono text-sm flex-1 overflow-x-auto no-scrollbar">$ {step.command}</span>
+                            <button onClick={() => handleCopy(step.command, `cmd-${index}`)} className="p-2 rounded-md hover:bg-active text-gray-400 hover:text-white transition-colors">
+                                {copyStatus[`cmd-${index}`] ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+export const Preview: React.FC<PreviewProps> = ({ project, refreshTrigger, previewEntryPath, onNavigate, isMobile, onClose }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [size, setSize] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'console' | 'terminal'>('terminal');
   const consoleBodyRef = useRef<HTMLDivElement>(null);
-
+  
+  const webcontainerRef = useRef<WebContainer | null>(null);
+  const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
+  const [serverUrl, setServerUrl] = useState<string | null>(null);
+  const [containerStatus, setContainerStatus] = useState<ContainerStatus>('idle');
+  
+  const isStatic = !project.type || project.type === 'starter' || project.type === 'blank';
+  const isRunnable = project.type === 'react-vite' || project.type === 'nextjs';
+  const isInstructional = !isStatic && !isRunnable;
+  
   const errorCount = logs.filter(log => log.level === 'error').length;
   
   useEffect(() => {
-    if (isConsoleOpen && consoleBodyRef.current) {
+    if ((activeTab === 'console' && consoleBodyRef.current)) {
         consoleBodyRef.current.scrollTop = consoleBodyRef.current.scrollHeight;
     }
-  }, [logs, isConsoleOpen]);
+  }, [logs, activeTab]);
 
   const bundleProject = (entryPath: string) => {
-    const htmlFile = files[entryPath] || files['/index.html'];
+    const htmlFile = project.files[entryPath] || project.files['/index.html'];
     if (!htmlFile) return '<h1>No index.html found</h1>';
-
     let content = htmlFile.content;
-
-    const resolveAssetPath = (basePath: string, relativePath: string) => {
-        if (relativePath.startsWith('/') || relativePath.startsWith('http') || relativePath.startsWith('data:')) {
-            return relativePath;
-        }
-        const baseDir = basePath.substring(0, basePath.lastIndexOf('/'));
-        const stack = baseDir.split('/').filter(p => p);
-        const parts = relativePath.split('/');
-
-        for (const part of parts) {
-            if (part === '.' || part === '') continue;
-            if (part === '..') {
-                stack.pop();
-            } else {
-                stack.push(part);
-            }
-        }
-        return '/' + stack.join('/');
-    };
-
-    // Inject CSS
-    const cssMatches = content.match(/<link[^>]+href=["']([^"']+)["'][^>]*>/g);
-    if (cssMatches) {
-      cssMatches.forEach(match => {
-        const hrefMatch = match.match(/href=["']([^"']+)["']/);
-        if (hrefMatch && !hrefMatch[1].startsWith('http') && !hrefMatch[1].startsWith('data:')) {
-          const path = resolveAssetPath(entryPath, hrefMatch[1]);
-          const cssFile = files[path];
-          if (cssFile) {
-            content = content.replace(match, `<style>${cssFile.content}</style>`);
-          } else {
-            console.warn(`[Preview] CSS file not found at resolved path: ${path}`);
-          }
-        }
-      });
-    }
-
-    // Inject JS
-    const jsMatches = content.match(/<script[^>]+src=["']([^"']+)["'][^>]*><\/script>/g);
-    if (jsMatches) {
-      jsMatches.forEach(match => {
-        const srcMatch = match.match(/src=["']([^"']+)["']/);
-        if (srcMatch && !srcMatch[1].startsWith('http')) {
-           const path = resolveAssetPath(entryPath, srcMatch[1]);
-           const jsFile = files[path];
-          if (jsFile) {
-            content = content.replace(match, `<script>${jsFile.content}</script>`);
-          } else {
-            console.warn(`[Preview] JS file not found at resolved path: ${path}`);
-          }
-        }
-      });
-    }
-
-    // Inject interceptor script and pass the current path
-    const finalScript = navigationAndConsoleInterceptorScript.replace('%%CURRENT_PATH%%', entryPath);
-    content = content.replace('</body>', `<script>${finalScript}</script></body>`);
-
+    const regex = /(href|src)=["'](?!\w+:\/\/)(?!#)([^"']+)["']/g;
+    content = content.replace(regex, (match, attr, path) => {
+        const fullPath = new URL(path, `file://${entryPath}`).pathname;
+        const file = project.files[fullPath];
+        if (!file) return match;
+        const blob = new Blob([file.content], { type: file.type });
+        return `${attr}="${URL.createObjectURL(blob)}"`;
+    });
+    content = content.replace('</body>', `<script>${navigationAndConsoleInterceptorScript.replace('%%CURRENT_PATH%%', entryPath)}</script></body>`);
     return content;
   };
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-        if (event.source !== iframeRef.current?.contentWindow) return;
-        
+        if (!isStatic || event.source !== iframeRef.current?.contentWindow) return;
         const { type, path, level, message } = event.data;
-        if (type === 'navigate' && path) {
-            if (files[path]) {
-                onNavigate(path);
-            } else {
-                console.warn(`Preview navigation failed: file not found at path "${path}"`);
-            }
-        } else if (type === 'console') {
-            setLogs(prev => [...prev, { level, message, timestamp: Date.now() }]);
-        }
+        if (type === 'navigate' && path) onNavigate(path);
+        else if (type === 'console') setLogs(prev => [...prev, { level, message, timestamp: Date.now() }]);
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [files, onNavigate]);
+  }, [project.files, onNavigate, isStatic]);
+  
+  const startDevServer = useCallback(async () => {
+    if (!isRunnable || !webcontainerRef.current) return;
+    const wc = webcontainerRef.current;
+
+    const streamToTerminal = async (process: any) => {
+        const reader = process.output.getReader();
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            setTerminalOutput(prev => [...prev, value]);
+        }
+    };
+    
+    setContainerStatus('installing');
+    const installProcess = await wc.spawn('npm', ['install']);
+    streamToTerminal(installProcess);
+    const installExitCode = await installProcess.exit;
+    if (installExitCode !== 0) {
+        setContainerStatus('error');
+        setTerminalOutput(prev => [...prev, `❌ npm install failed with code ${installExitCode}`]);
+        return;
+    }
+
+    setContainerStatus('starting');
+    const startProcess = await wc.spawn('npm', ['run', 'dev']);
+    streamToTerminal(startProcess);
+    
+    wc.on('server-ready', (port, url) => {
+        setServerUrl(url);
+        setContainerStatus('running');
+    });
+
+  }, [isRunnable, project.files]);
 
   useEffect(() => {
-    if (!iframeRef.current) return;
+    if (!isRunnable) {
+        webcontainerRef.current?.teardown();
+        webcontainerRef.current = null;
+        return;
+    }
+    
+    const boot = async () => {
+      if (webcontainerRef.current) return;
+      
+      setContainerStatus('booting');
+      setTerminalOutput([]);
+      setServerUrl(null);
+      
+      const wc = await WebContainer.boot();
+      webcontainerRef.current = wc;
+
+      setContainerStatus('mounting');
+      // FIX: Explicitly type `file` as `File` to fix properties not being found on `unknown` type from Object.values.
+      const filesForWC = Object.values(project.files).reduce((acc, file: File) => {
+          if (file.name !== '.keep') {
+            const path = file.path.startsWith('/') ? file.path.substring(1) : file.path;
+            acc[path] = { file: { contents: file.content } };
+          }
+          return acc;
+      }, {} as any);
+      await wc.mount(filesForWC);
+      
+      await startDevServer();
+    };
+
+    boot();
+
+    return () => {
+        // Don't tear down on re-render, only when component unmounts or project type changes.
+    };
+  }, [isRunnable, project.id, startDevServer]);
+
+
+  useEffect(() => {
+    if (!iframeRef.current || !isStatic) return;
     setLoading(true);
     setLogs([]);
     iframeRef.current.srcdoc = bundleProject(previewEntryPath);
-    const timeout = setTimeout(() => {
-      setLoading(false);
-    }, 150);
+    const timeout = setTimeout(() => setLoading(false), 150);
     return () => clearTimeout(timeout);
-  }, [files, refreshTrigger, previewEntryPath]);
-
+  }, [project.files, refreshTrigger, previewEntryPath, isStatic]);
+  
+  useEffect(() => {
+    if (serverUrl && iframeRef.current) {
+        iframeRef.current.src = serverUrl;
+    }
+  }, [serverUrl]);
+  
   const getDeviceClasses = () => {
-    switch (size) {
-      case 'mobile': return 'w-[390px] h-[844px] bg-black rounded-[40px] md:rounded-[54px] p-2.5 md:p-3.5 shadow-2xl ring-2 ring-gray-800';
-      case 'tablet': return 'w-[768px] h-[1024px] bg-black rounded-[24px] md:rounded-[32px] p-3 md:p-4 shadow-2xl ring-2 ring-gray-800';
-      default: return 'w-full h-full bg-sidebar';
+    switch(size) {
+      case 'mobile': return 'w-[375px] h-[667px] shadow-2xl rounded-2xl border-4 border-gray-700';
+      case 'tablet': return 'w-[768px] h-[1024px] shadow-2xl rounded-2xl border-4 border-gray-700';
+      default: return 'w-full h-full';
     }
   };
 
-  const getIframeClasses = () => {
-    switch(size) {
-      case 'mobile': return 'rounded-[30px] md:rounded-[40px]';
-      case 'tablet': return 'rounded-[16px] md:rounded-[20px]';
-      default: return '';
-    }
-  }
-  
-  const handleRefresh = () => {
-    setLoading(true);
-    if (iframeRef.current) {
-        setLogs([]);
-        iframeRef.current.srcdoc = bundleProject(previewEntryPath);
-    }
-    setTimeout(() => setLoading(false), 500);
-  };
-  
   const renderLogMessage = (args: any[]) => {
-    return args.map((arg, index) => {
-        if (arg && arg.__error) {
-            return <span key={index} className="text-red-400">{arg.stack || arg.message}</span>;
-        }
-        if (typeof arg === 'object' && arg !== null) {
-            return <pre key={index} className="text-xs">{JSON.stringify(arg, null, 2)}</pre>;
-        }
-        return <span key={index}>{String(arg)}&nbsp;</span>;
+    return args.map((arg, i) => {
+      try {
+        const content = JSON.parse(arg);
+        if (typeof content === 'object') return <pre key={i} className="text-xs whitespace-pre-wrap break-all">{JSON.stringify(content, null, 2)}</pre>;
+        return <span key={i}>{content.toString()} </span>;
+      } catch (e) {
+        return <span key={i}>{arg} </span>;
+      }
     });
   };
+
+  const renderContent = () => {
+    if (isInstructional) {
+      return <InstructionView projectType={project.type} />;
+    }
+    
+    if (isRunnable) {
+        return (
+             <div className="flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar relative">
+                {containerStatus !== 'running' && (
+                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm text-center">
+                        <WebBenchLoader size="md" />
+                        <p className="mt-4 text-sm text-gray-400">{statusMessages[containerStatus]}</p>
+                        {containerStatus === 'error' && <p className="mt-2 text-xs text-red-400">Check the terminal for details.</p>}
+                    </div>
+                )}
+                 <iframe ref={iframeRef} title="preview" className="w-full h-full border-none bg-white rounded-lg" sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" />
+             </div>
+        );
+    }
+    
+    // isStatic
+    return (
+      <div className="flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar relative">
+        {loading && <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/50"><WebBenchLoader size="md"/></div>}
+        <div className={`transition-all duration-300 overflow-hidden relative z-10 shrink-0 ${getDeviceClasses()}`}>
+          <iframe ref={iframeRef} title="preview" className={`w-full h-full border-none bg-white ${size === 'desktop' ? 'rounded-lg' : 'rounded-sm'}`} sandbox="allow-scripts allow-forms allow-popups allow-modals" />
+        </div>
+      </div>
+    );
+  };
+  
+  const bottomPanelHeight = isRunnable ? 'h-48' : 'h-full';
 
   return (
     <div className="h-full flex flex-col bg-sidebar border-l border-border">
       <div className="h-9 px-3 md:px-4 flex items-center justify-between border-b border-border">
         <div className="flex items-center gap-3">
           <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Preview</span>
-          <div className="w-px h-4 bg-border"></div>
-          <button 
-              onClick={() => setIsConsoleOpen(!isConsoleOpen)} 
-              title={isConsoleOpen ? "Hide Console" : "Show Console"}
-              className={`flex items-center gap-2 px-2 py-1 rounded-md text-xs transition-colors ${isConsoleOpen ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50 hover:text-gray-200'}`}
-          >
-              <Code className="w-3.5 h-3.5"/>
-              <span>Console</span>
-              {errorCount > 0 && (
-                  <div className={`flex items-center gap-1 rounded-full text-xs px-1.5 ${isConsoleOpen ? 'bg-red-500/50 text-white' : 'bg-red-500/20 text-red-400'}`}>
-                      <AlertTriangle className="w-3 h-3"/>
-                      <span>{errorCount}</span>
-                  </div>
-              )}
-          </button>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2">
-          <button 
-            onClick={() => setSize('mobile')} 
-            className={`p-1 rounded ${size === 'mobile' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`}
-            title="Mobile View"
-          >
-            <Smartphone className="w-3.5 h-3.5 md:w-4 md:h-4" />
-          </button>
-          <button 
-            onClick={() => setSize('tablet')} 
-            className={`p-1 rounded ${size === 'tablet' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`}
-            title="Tablet View"
-          >
-            <Tablet className="w-3.5 h-3.5 md:w-4 md:h-4" />
-          </button>
-          <button 
-            onClick={() => setSize('desktop')} 
-            className={`p-1 rounded ${size === 'desktop' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`}
-            title="Desktop View"
-          >
-            <Monitor className="w-3.5 h-3.5 md:w-4 md:h-4" />
-          </button>
-          <div className="w-px h-4 bg-gray-600 mx-1"></div>
-          <button 
-            onClick={handleRefresh} 
-            className="p-1 text-gray-400 hover:text-white"
-            title="Refresh Preview"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 md:w-4 md:h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-          {isMobile && onClose && (
-            <button 
-              onClick={onClose} 
-              className="p-1 text-gray-400 hover:text-white"
-              title="Close Preview"
-            >
-              <X className="w-3.5 h-3.5 md:w-4 md:h-4" />
-            </button>
-          )}
+            {isStatic && (
+                <>
+                    <button onClick={() => setSize('mobile')} className={`p-1 rounded ${size === 'mobile' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} title="Mobile View"><Smartphone className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
+                    <button onClick={() => setSize('tablet')} className={`p-1 rounded ${size === 'tablet' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} title="Tablet View"><Tablet className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
+                    <button onClick={() => setSize('desktop')} className={`p-1 rounded ${size === 'desktop' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} title="Desktop View"><Monitor className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
+                    <div className="w-px h-4 bg-gray-600 mx-1"></div>
+                </>
+            )}
+            {isMobile && onClose && <button onClick={onClose} className="p-1 text-gray-400 hover:text-white" title="Close Preview"><X className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>}
         </div>
       </div>
-      <div className="flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar relative">
-        
-        {isConsoleOpen && (
-          <div className="absolute top-0 left-0 right-0 z-30 h-48 md:h-56 bg-[#252526]/95 backdrop-blur-sm border-b border-border animate-in slide-in-from-top-4 duration-300">
-            <div className="h-full flex flex-col">
-              <div className="h-8 flex items-center justify-between px-3 md:px-4 shrink-0">
-                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Console Log</span>
-                <button onClick={() => setLogs([])} title="Clear console" className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/10"><Trash2 className="w-3.5 h-3.5 md:w-4 md:h-4"/></button>
-              </div>
-              <div ref={consoleBodyRef} className="flex-1 overflow-y-auto custom-scrollbar p-2 text-xs font-mono">
-                  {logs.map((log, i) => (
-                      <div key={i} className={`flex items-start gap-2 p-1 border-b border-white/5 ${log.level === 'error' ? 'text-red-400 bg-red-500/5' : log.level === 'warn' ? 'text-yellow-400 bg-yellow-500/5' : 'text-gray-300'}`}>
-                         <span className="text-gray-500 shrink-0 select-none">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                         <div className="flex-1 whitespace-pre-wrap break-all">{renderLogMessage(log.message)}</div>
-                      </div>
-                  ))}
-              </div>
+      
+      <div className="flex-1 flex flex-col min-h-0">
+        {renderContent()}
+        <div className={`flex flex-col bg-sidebar border-t border-border shrink-0 ${isRunnable ? 'h-48' : 'h-auto'}`}>
+            <div className="flex items-center border-b border-border">
+                 {isRunnable && <button onClick={() => setActiveTab('terminal')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'terminal' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}><Terminal className="w-3.5 h-3.5"/> Terminal</button>}
+                 <button onClick={() => setActiveTab('console')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'console' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}>
+                    <Code className="w-3.5 h-3.5"/> Console
+                    {errorCount > 0 && <div className="flex items-center gap-1 rounded-full text-xs px-1.5 bg-red-500/20 text-red-400"><AlertTriangle className="w-3 h-3"/>{errorCount}</div>}
+                 </button>
             </div>
-          </div>
-        )}
-        
-        {loading && (
-          <div className="absolute inset-0 z-20 bg-sidebar/80 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in">
-            <WebBenchLoader size="sm" text="Building Preview..."/>
-          </div>
-        )}
-
-        <div 
-          className={`transition-all duration-300 overflow-hidden relative z-10 shrink-0 ${getDeviceClasses()}`}
-        >
-          {size === 'mobile' && (
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 h-6 w-32 md:h-8 md:w-40 bg-black rounded-b-2xl z-20 flex justify-center items-center">
-              <div className="w-10 h-1 md:w-12 md:h-1.5 bg-gray-700 rounded-full"></div>
+            <div className="flex-1 overflow-auto custom-scrollbar">
+                {activeTab === 'console' && (
+                    <div ref={consoleBodyRef} className="p-2 text-xs font-mono">
+                        {logs.map((log, i) => (
+                            <div key={i} className={`flex items-start gap-2 py-1 border-b border-border/50 ${log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-yellow-400' : 'text-gray-300'}`}>
+                                <span className="opacity-60">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                                <div className="flex-1 break-words">{renderLogMessage(log.message)}</div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                {activeTab === 'terminal' && isRunnable && (
+                    <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-all h-full">
+                        {terminalOutput.join('').replace(/\n/g, '<br />')}
+                    </pre>
+                )}
             </div>
-          )}
-          <iframe 
-            ref={iframeRef}
-            title="preview"
-            className={`w-full h-full border-none bg-white ${getIframeClasses()}`}
-            sandbox="allow-scripts allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox"
-          />
         </div>
       </div>
     </div>

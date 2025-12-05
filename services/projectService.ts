@@ -1,7 +1,10 @@
 import { supabase } from './supabaseClient';
-import { Project, File, ChatMessage, ChatSession, Checkpoint } from '../types';
+// FIX: Import missing types `ChatSession`, `ChatMessage`, and `Checkpoint`.
+import { Project, File, ChatSession, ChatMessage, Checkpoint } from '../types';
 
-const INITIAL_PROJECT_FILES: Record<string, File> = {
+// --- TEMPLATES ---
+
+const STARTER_TEMPLATE_FILES: Record<string, File> = {
   '/index.html': {
     path: '/index.html',
     name: 'index.html',
@@ -340,6 +343,210 @@ footer {
   }
 };
 
+const REACT_VITE_FILES: Record<string, File> = {
+  '/index.html': { path: '/index.html', name: 'index.html', type: 'html', content: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>React + Vite</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`, lastModified: Date.now() },
+  '/src/main.tsx': { path: '/src/main.tsx', name: 'main.tsx', type: 'tsx', content: `import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.tsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)`, lastModified: Date.now() },
+  '/src/App.tsx': { path: '/src/App.tsx', name: 'App.tsx', type: 'tsx', content: `function App() {
+  return (
+    <div className="app-container">
+      <h1>Hello from React!</h1>
+      <p>Start editing and see the magic happen.</p>
+    </div>
+  )
+}
+export default App`, lastModified: Date.now() },
+  '/src/index.css': { path: '/src/index.css', name: 'index.css', type: 'css', content: `body {
+  background-color: #242424;
+  color: white;
+  font-family: sans-serif;
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-height: 100vh;
+}
+.app-container {
+  text-align: center;
+  margin: auto;
+}`, lastModified: Date.now() },
+  '/package.json': { path: '/package.json', name: 'package.json', type: 'json', content: `{
+  "name": "react-vite-starter",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0"
+  }
+}`, lastModified: Date.now() },
+  '/vite.config.ts': { path: '/vite.config.ts', name: 'vite.config.ts', type: 'typescript', content: `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})`, lastModified: Date.now() },
+  '/tsconfig.json': { path: '/tsconfig.json', name: 'tsconfig.json', type: 'json', content: `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}`, lastModified: Date.now() },
+   '/tsconfig.node.json': { path: '/tsconfig.node.json', name: 'tsconfig.node.json', type: 'json', content: `{
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["vite.config.ts"]
+}`, lastModified: Date.now() },
+};
+
+const NEXTJS_FILES: Record<string, File> = {
+  '/app/page.tsx': { path: '/app/page.tsx', name: 'page.tsx', type: 'tsx', content: `export default function Home() {
+  return (
+    <main>
+      <h1>Welcome to Next.js!</h1>
+    </main>
+  );
+}`, lastModified: Date.now() },
+  '/app/layout.tsx': { path: '/app/layout.tsx', name: 'layout.tsx', type: 'tsx', content: `export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}`, lastModified: Date.now() },
+  '/package.json': { path: '/package.json', name: 'package.json', type: 'json', content: `{
+  "name": "next-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "react": "^18",
+    "react-dom": "^18",
+    "next": "14.2.3"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18"
+  }
+}`, lastModified: Date.now() },
+};
+
+const LARAVEL_FILES: Record<string, File> = {
+  '/routes/web.php': { path: '/routes/web.php', name: 'web.php', type: 'php', content: `<?php
+use Illuminate\\Support\\Facades\\Route;
+
+Route::get('/', function () {
+    return view('welcome');
+});`, lastModified: Date.now() },
+  '/resources/views/welcome.blade.php': { path: '/resources/views/welcome.blade.php', name: 'welcome.blade.php', type: 'blade', content: `<!DOCTYPE html>
+<html>
+    <head>
+        <title>Laravel</title>
+    </head>
+    <body>
+        <h1>Hello from Laravel!</h1>
+    </body>
+</html>`, lastModified: Date.now() },
+};
+
+const PYTHON_FILES: Record<string, File> = {
+  '/main.py': { path: '/main.py', name: 'main.py', type: 'python', content: `def main():
+    print("Hello from Python!")
+
+if __name__ == "__main__":
+    main()`, lastModified: Date.now() },
+};
+
+const PHP_FILES: Record<string, File> = {
+  '/index.php': { path: '/index.php', name: 'index.php', type: 'php', content: `<?php
+echo "<h1>Hello from PHP!</h1>";`, lastModified: Date.now() },
+};
+
+const CPP_FILES: Record<string, File> = {
+  '/main.cpp': { path: '/main.cpp', name: 'main.cpp', type: 'cpp', content: `#include <iostream>
+
+int main() {
+    std::cout << "Hello from C++!" << std::endl;
+    return 0;
+}`, lastModified: Date.now() },
+};
+
+
+const getTemplateFiles = (template: Project['type']): Record<string, File> => {
+    switch(template) {
+        case 'starter': return STARTER_TEMPLATE_FILES;
+        case 'react-vite': return REACT_VITE_FILES;
+        case 'nextjs': return NEXTJS_FILES;
+        case 'laravel': return LARAVEL_FILES;
+        case 'python': return PYTHON_FILES;
+        case 'php': return PHP_FILES;
+        case 'cpp': return CPP_FILES;
+        case 'blank':
+        default: return {};
+    }
+};
+
 export const projectService = {
   // --- Auth Wrappers ---
   async getCurrentUser() {
@@ -358,6 +565,9 @@ export const projectService = {
       if (error) throw error;
     } catch (error: any) {
       console.error("Sign in error:", error);
+      if (error.message === 'Invalid login credentials') {
+        throw new Error("Invalid login credentials. Please double-check your email and password. If the issue persists, ensure your email has been verified.");
+      }
       throw new Error(error.message || "Failed to sign in. Please check your credentials.");
     }
   },
@@ -374,12 +584,7 @@ export const projectService = {
 
   async signInWithOAuth(provider) {
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: {
-          redirectTo: `${window.location.origin}/#/dashboard`,
-        },
-      });
+      const { error } = await supabase.auth.signInWithOAuth({ provider });
       if (error) throw error;
     } catch (error: any) {
       console.error("OAuth sign in error:", error);
@@ -432,7 +637,8 @@ export const projectService = {
         ...p,
         createdAt: new Date(p.created_at).getTime(),
         updatedAt: new Date(p.updated_at).getTime(),
-        files: p.files || {}
+        files: p.files || {},
+        type: p.type || 'starter'
       }));
     } catch (error: any) {
       console.error("Error fetching projects:", error);
@@ -453,25 +659,28 @@ export const projectService = {
         ...data,
         createdAt: new Date(data.created_at).getTime(),
         updatedAt: new Date(data.updated_at).getTime(),
-        files: data.files || {}
+        files: data.files || {},
+        type: data.type || 'starter'
       };
     } catch (error: any) {
       console.error(`Error fetching project ${id}:`, error);
-      if (error.code === 'PGRST116') {
-        throw new Error("Project not found. It may have been deleted.");
+      if (error.code === 'PGRST116' || error.message.includes("not found")) {
+        throw new Error("Project not found. It may have been deleted, or your Supabase Row Level Security (RLS) policies might be preventing access.");
       }
       throw new Error(`Could not load the project: ${error.message}`);
     }
   },
 
-  async createProject(name: string, files = INITIAL_PROJECT_FILES): Promise<Project> {
+  async createProject(name: string, type: Project['type'] = 'starter'): Promise<Project> {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
 
+      const files = getTemplateFiles(type);
+
       const { data, error } = await supabase
         .from('projects')
-        .insert({ user_id: user.id, name, files })
+        .insert({ user_id: user.id, name, files, type })
         .select()
         .single();
 
@@ -481,7 +690,8 @@ export const projectService = {
         ...data,
         createdAt: new Date(data.created_at).getTime(),
         updatedAt: new Date(data.updated_at).getTime(),
-        files: data.files
+        files: data.files,
+        type: data.type
       };
     } catch (error: any) {
       console.error("Error creating project:", error);
@@ -598,32 +808,30 @@ export const projectService = {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated to save message.');
 
-      // Build a payload with only the columns that exist in the DB.
-      // This prevents sending client-only fields like 'timestamp' and ensures RLS policy is met.
-      const payload = {
+      const payload: any = {
         user_id: user.id,
         client_id: message.clientId,
         session_id: message.session_id,
         role: message.role,
         content: message.content,
-        model: message.model,
-        attachments: message.attachments,
-        sources: message.sources,
-        completed_files: message.completedFiles,
-        is_error: message.isError,
       };
+      
+      if (message.model !== undefined) payload.model = message.model;
+      if (message.attachments !== undefined) payload.attachments = message.attachments;
+      if (message.sources !== undefined) payload.sources = message.sources;
+      if (message.completedFiles !== undefined) payload.completed_files = message.completedFiles;
+      if (message.isError !== undefined) payload.is_error = message.isError;
       
       const { data, error } = await supabase
         .from('chat_messages')
-        .upsert(payload, { onConflict: 'client_id' })
+        .upsert(payload, { onConflict: 'session_id,client_id' })
         .select()
         .single();
 
       if (error) throw error;
       
-      // Return a full ChatMessage object, mapping DB fields to client fields
       return {
-          ...message, // a little inefficient but ensures all client fields are preserved
+          ...message,
           id: data.id,
           clientId: data.client_id,
           session_id: data.session_id,
@@ -639,8 +847,8 @@ export const projectService = {
     } catch (error: any) {
       const message = (error as Error).message || 'Failed to save chat message.';
       console.error('Error saving chat message:', error);
-       if (message.toLowerCase().includes("column")) {
-          throw new Error("Database schema mismatch. Please ensure your 'chat_messages' table matches the provided schema and re-run the app.");
+       if (message.toLowerCase().includes("column") || message.toLowerCase().includes("does not exist")) {
+          throw new Error("Database schema mismatch. Your 'chat_messages' table may be missing columns. Please ensure it has the following: id (uuid), created_at (timestamptz), user_id (uuid), session_id (uuid), client_id (text), role (text), content (text), model (text), attachments (jsonb), sources (jsonb), completed_files (jsonb), is_error (boolean).");
       }
       throw new Error(message);
     }

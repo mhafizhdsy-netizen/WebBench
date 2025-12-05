@@ -2,7 +2,7 @@ export interface File {
   path: string;
   name: string;
   content: string;
-  type: 'html' | 'css' | 'javascript' | 'json' | 'markdown' | 'image' | 'folder' | 'plaintext';
+  type: 'html' | 'css' | 'javascript' | 'json' | 'markdown' | 'image' | 'folder' | 'plaintext' | 'typescript' | 'tsx' | 'python' | 'php' | 'cpp' | 'blade' | 'vite' | 'next';
   lastModified: number;
 }
 
@@ -21,6 +21,7 @@ export interface Project {
   updatedAt: number;
   files: Record<string, File>;
   lastOpenedFile?: string;
+  type?: 'blank' | 'starter' | 'react-vite' | 'nextjs' | 'laravel' | 'python' | 'php' | 'cpp';
 }
 
 export interface ChatSession {

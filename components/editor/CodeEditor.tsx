@@ -7,7 +7,7 @@ import {
   X, ChevronRight, FileCode, FileJson, FileType, MoreVertical, 
   Undo2, Redo2, Search, Replace, AlignLeft, CheckSquare,
   MessageSquare, Trash2, Copy, List, FoldVertical, UnfoldVertical,
-  Scissors, XCircle, AlertTriangle
+  Scissors, XCircle, AlertTriangle, BrainCircuit, Terminal, Database
 } from 'lucide-react';
 
 interface CodeEditorProps {
@@ -136,21 +136,36 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     editorRef.current.focus();
   };
 
-  const getLanguage = (type: string) => {
+  const getLanguage = (type: File['type']) => {
     switch (type) {
       case 'html': return 'html';
       case 'css': return 'css';
       case 'javascript': return 'javascript';
+      case 'typescript': return 'typescript';
+      case 'tsx': return 'typescript';
+      case 'python': return 'python';
+      case 'php': return 'php';
+      case 'cpp': return 'cpp';
+      case 'blade': return 'php';
       case 'json': return 'json';
       default: return 'plaintext';
     }
   };
 
-  const getFileIcon = (path: string) => {
-    if (path.endsWith('.html')) return <FileCode className="w-2.5 h-2.5 md:w-3 md:h-3 text-orange-500" />;
-    if (path.endsWith('.css')) return <FileCode className="w-2.5 h-2.5 md:w-3 md:h-3 text-blue-400" />;
-    if (path.endsWith('.js')) return <FileCode className="w-2.5 h-2.5 md:w-3 md:h-3 text-yellow-400" />;
-    return <FileType className="w-2.5 h-2.5 md:w-3 md:h-3 text-gray-400" />;
+  const getFileIcon = (type: File['type']) => {
+    const className = "w-2.5 h-2.5 md:w-3 md:h-3";
+    switch (type) {
+      case 'html': return <FileCode className={`${className} text-orange-500`} />;
+      case 'css': return <FileCode className={`${className} text-blue-400`} />;
+      case 'javascript': return <FileCode className={`${className} text-yellow-400`} />;
+      case 'typescript':
+      case 'tsx': return <BrainCircuit className={`${className} text-blue-400`} />;
+      case 'python': return <FileCode className={`${className} text-green-400`} />;
+      case 'php':
+      case 'blade': return <Database className={`${className} text-indigo-400`} />;
+      case 'cpp': return <Terminal className={`${className} text-cyan-400`} />;
+      default: return <FileType className={`${className} text-gray-400`} />;
+    }
   };
 
   const renderBreadcrumbs = () => {
@@ -181,6 +196,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
           )}
           {openFiles.map(path => {
             const isActive = path === activeFile;
+            const fileData = files[path];
             const fileName = path.split('/').pop() || 'file';
             return (
               <div 
@@ -191,7 +207,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
                   ${isActive ? 'bg-background text-white border-t-2 border-t-accent' : 'bg-[#252526] text-gray-400 hover:bg-[#2d2d2d]'}
                 `}
               >
-                {getFileIcon(path)}
+                {fileData && getFileIcon(fileData.type)}
                 <span className={`truncate flex-1 ${isActive ? 'font-semibold' : ''}`}>{fileName}</span>
                 <button 
                   onClick={(e) => { e.stopPropagation(); onCloseFile(path); }}

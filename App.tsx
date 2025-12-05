@@ -4,6 +4,7 @@ import { supabase } from './services/supabaseClient';
 import { ThemeProvider } from './context/ThemeContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import SharePage from './pages/SharePage';
 import Editor from './pages/Editor';
 import { Loader2 } from 'lucide-react';
 import { ResetPassword } from './components/auth/ResetPassword';
@@ -70,6 +71,7 @@ const App: React.FC = () => {
       <HashRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/share/:projectId" element={<SharePage />} />
           <Route 
             path="/dashboard" 
             element={

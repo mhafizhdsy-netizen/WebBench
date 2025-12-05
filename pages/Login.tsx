@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { projectService } from '../services/projectService';
 import { Button } from '../components/ui/Button';
 import { WebBenchLoader } from '../components/ui/Loader';
@@ -78,6 +78,9 @@ const Login: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
+  
+  const from = location.state?.from?.pathname || '/dashboard';
 
   const clearState = () => {
     setError(null);
@@ -100,7 +103,7 @@ const Login: React.FC = () => {
         setPassword('');
       } else { // mode === 'login'
         await projectService.signInWithPassword(email, password);
-        navigate('/dashboard');
+        navigate(from, { replace: true });
       }
     } catch (err: any) {
       setError(err.message || "An unknown error occurred.");
@@ -127,6 +130,8 @@ const Login: React.FC = () => {
   
   const handleGithubLogin = async () => {
     try {
+      // Store the intended redirect path before initiating OAuth
+      localStorage.setItem('redirect_path', from);
       await projectService.signInWithOAuth('github');
     } catch (err: any) {
       setError(err.message || "Failed to sign in with GitHub.");
