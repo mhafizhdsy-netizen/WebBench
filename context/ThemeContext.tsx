@@ -11,7 +11,6 @@ interface ThemeColors {
   border: string;
 }
 
-// FIX: Export the Theme interface so it can be imported as a type.
 export interface Theme {
   id: ThemeId;
   name: string;

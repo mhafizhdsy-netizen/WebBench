@@ -73,7 +73,7 @@ const INITIAL_PROJECT_FILES: Record<string, File> = {
             </div>
             <div class="feature-card">
                 <h3>AI Powered</h3>
-                <p>Integrated with Gemini 2.5 to write code for you.</p>
+                <p>Integrated with Gemini to write code for you.</p>
             </div>
         </section>
     </div>
@@ -99,6 +99,10 @@ const INITIAL_PROJECT_FILES: Record<string, File> = {
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+    scroll-behavior: smooth;
+}
 
 body {
     background-color: var(--bg-color);
@@ -133,17 +137,17 @@ body {
     color: white;
 }
 
-.nav-links { display: flex; gap: 20px; items-center; }
+.nav-links { display: flex; gap: 20px; align-items: center; }
 .nav-links a { color: var(--secondary); text-decoration: none; font-size: 0.9rem; transition: color 0.3s; }
 .nav-links a:hover { color: white; }
 
-.mobile-menu-btn { display: none; background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; }
+.mobile-menu-btn { display: none; background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; z-index: 101; }
 .mobile-menu { 
     display: none; 
     flex-direction: column; 
     background: #1e293b; 
     padding: 20px; 
-    position: absolute; 
+    position: fixed; 
     top: 70px; 
     right: 20px; 
     border-radius: 8px; 
@@ -151,6 +155,7 @@ body {
     z-index: 100;
 }
 .mobile-menu a { color: white; text-decoration: none; padding: 10px 0; border-bottom: 1px solid #334155; }
+.mobile-menu a:last-child { border-bottom: none; }
 .mobile-menu.active { display: flex; }
 
 /* Hero */
@@ -175,6 +180,7 @@ h1 {
 .gradient-text {
     background: linear-gradient(to right, var(--primary), var(--accent));
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
@@ -187,13 +193,14 @@ p {
 
 .buttons { display: flex; gap: 15px; flex-wrap: wrap; }
 
-button {
+button, .btn-sm {
     padding: 12px 24px;
     border-radius: 8px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
     font-family: inherit;
+    text-decoration: none;
 }
 
 .btn-primary { background: var(--primary); color: white; border: none; }
@@ -202,7 +209,7 @@ button {
 .btn-secondary { background: transparent; color: white; border: 1px solid var(--secondary); }
 .btn-secondary:hover { border-color: white; }
 
-.btn-sm { padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 6px; color: white !important; }
+.btn-sm { padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 6px; color: white !important; display: inline-block; }
 
 /* Visual / Glassmorphism */
 .visual { flex: 1; display: flex; justify-content: center; }
@@ -236,6 +243,7 @@ button {
 #output {
     margin-top: 20px; padding: 10px; background: rgba(59, 130, 246, 0.1);
     border-left: 3px solid var(--primary); color: var(--primary); font-size: 0.9rem;
+    border-radius: 4px;
 }
 .hidden { display: none; }
 
@@ -253,7 +261,7 @@ button {
     padding: 25px;
     border-radius: 12px;
     border: 1px solid #1e293b;
-    transition: transform 0.2s;
+    transition: transform 0.2s, border-color 0.2s;
 }
 
 .feature-card:hover { transform: translateY(-5px); border-color: var(--primary); }
@@ -289,37 +297,45 @@ footer {
     path: '/js/main.js',
     name: 'main.js',
     type: 'javascript',
-    content: `const btn = document.getElementById('actionBtn');
-const output = document.getElementById('output');
-const menuBtn = document.getElementById('menuBtn');
-const mobileMenu = document.getElementById('mobileMenu');
+    content: `document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('actionBtn');
+    const output = document.getElementById('output');
+    const menuBtn = document.getElementById('menuBtn');
+    const mobileMenu = document.getElementById('mobileMenu');
 
-// Interaction Demo
-btn.addEventListener('click', () => {
-    output.textContent = "🚀 WebBench is running your code instantly!";
-    output.classList.remove('hidden');
-    
-    // Add a simple animation to the button
-    btn.style.transform = 'scale(0.95)';
-    setTimeout(() => {
-        btn.style.transform = 'translateY(-2px)';
-    }, 150);
-});
+    // Interaction Demo
+    if (btn && output) {
+        btn.addEventListener('click', () => {
+            output.textContent = "🚀 WebBench is running your code instantly!";
+            output.classList.remove('hidden');
+            
+            // Add a simple animation to the button
+            btn.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                btn.style.transform = 'translateY(-2px)';
+            }, 150);
+        });
+    } else {
+        console.error("Could not find action button or output element.");
+    }
 
-// Mobile Menu Toggle
-if (menuBtn) {
-    menuBtn.addEventListener('click', () => {
-        mobileMenu.classList.toggle('active');
-    });
-}
+    // Mobile Menu Toggle
+    if (menuBtn && mobileMenu) {
+        menuBtn.addEventListener('click', () => {
+            mobileMenu.classList.toggle('active');
+        });
+    } else {
+        console.error("Could not find mobile menu button or menu element.");
+    }
 
-// Set current year in footer
-const currentYearSpan = document.getElementById('current-year');
-if (currentYearSpan) {
-  currentYearSpan.textContent = new Date().getFullYear().toString();
-}
+    // Set current year in footer
+    const currentYearSpan = document.getElementById('current-year');
+    if (currentYearSpan) {
+        currentYearSpan.textContent = new Date().getFullYear().toString();
+    }
 
-console.log("WebBench Starter Loaded");`,
+    console.log("WebBench Starter Loaded");
+});`,
     lastModified: Date.now()
   }
 };
@@ -594,7 +610,7 @@ export const projectService = {
         attachments: message.attachments,
         sources: message.sources,
         completed_files: message.completedFiles,
-        // is_error: message.isError, // REMOVED to prevent schema mismatch error
+        is_error: message.isError,
       };
       
       const { data, error } = await supabase

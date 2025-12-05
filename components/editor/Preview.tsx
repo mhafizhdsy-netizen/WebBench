@@ -1,38 +1,176 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { File } from '../../types';
-import { RefreshCw, Monitor, Smartphone, Tablet } from 'lucide-react';
+import { RefreshCw, Monitor, Smartphone, Tablet, AlertTriangle, Code, Trash2, ChevronUp } from 'lucide-react';
 import { WebBenchLoader } from '../ui/Loader';
 
 interface PreviewProps {
   files: Record<string, File>;
   refreshTrigger: number;
+  previewEntryPath: string;
+  onNavigate: (path: string) => void;
 }
 
-export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger }) => {
+type LogLevel = 'log' | 'warn' | 'error';
+interface LogEntry {
+  level: LogLevel;
+  message: any[];
+  timestamp: number;
+}
+
+const navigationAndConsoleInterceptorScript = `
+function resolvePath(base, relative) {
+    // If the path is already absolute, or an external link, return it as is.
+    // The click handler already checks for http, but this is a safeguard.
+    if (relative.startsWith('/') || relative.startsWith('http')) {
+        return relative;
+    }
+
+    // Get the directory of the base path. E.g., for '/pages/about.html', this is '/pages'
+    const baseDir = base.substring(0, base.lastIndexOf('/'));
+    const stack = baseDir.split('/').filter(p => p); // E.g., ['pages']
+    const parts = relative.split('/');
+
+    for (const part of parts) {
+        if (part === '.' || part === '') continue; // Ignore './' and empty parts from '//'
+        if (part === '..') {
+            stack.pop(); // Go up one level
+        } else {
+            stack.push(part); // Go down into a directory or add filename
+        }
+    }
+    return '/' + stack.join('/');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const CURRENT_PATH = '%%CURRENT_PATH%%';
+
+  document.body.addEventListener('click', (e) => {
+    let target = e.target;
+    // Traverse up the DOM to find an anchor tag
+    while (target && target.tagName !== 'A') {
+      target = target.parentElement;
+    }
+
+    if (target && target.tagName === 'A') {
+      const anchor = target;
+      const href = anchor.getAttribute('href');
+
+      // Intercept relative local links
+      if (href && !href.startsWith('#') && !href.startsWith('http')) {
+        e.preventDefault();
+        const absolutePath = resolvePath(CURRENT_PATH, href);
+        window.parent.postMessage({ type: 'navigate', path: absolutePath }, '*');
+      }
+    }
+  });
+});
+
+
+// --- Console Interceptor ---
+const originalConsole = {
+  log: console.log.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console)
+};
+
+const sendLog = (level, args) => {
+  try {
+    // Basic serialization for complex objects
+    const serializedArgs = args.map(arg => {
+      if (arg instanceof Error) {
+        return { __error: true, message: arg.message, stack: arg.stack };
+      }
+      if (typeof arg === 'object' && arg !== null) {
+        try {
+          return JSON.parse(JSON.stringify(arg));
+        } catch(e) {
+          return arg.toString();
+        }
+      }
+      return arg;
+    });
+    window.parent.postMessage({ type: 'console', level, message: serializedArgs }, '*');
+  } catch(e) {
+    originalConsole.error('Error posting log to parent:', e);
+  }
+};
+
+console.log = (...args) => {
+  originalConsole.log(...args);
+  sendLog('log', args);
+};
+console.warn = (...args) => {
+  originalConsole.warn(...args);
+  sendLog('warn', args);
+};
+console.error = (...args) => {
+  originalConsole.error(...args);
+  sendLog('error', args);
+};
+
+window.onerror = (message, source, lineno, colno, error) => {
+  const errorArgs = [message, 'at', \`\${source}:\${lineno}:\${colno}\`];
+  if(error) {
+    errorArgs.push(error.stack);
+  }
+  sendLog('error', errorArgs);
+};
+`;
+
+
+export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger, previewEntryPath, onNavigate }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [size, setSize] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [loading, setLoading] = useState(false);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
+  const consoleBodyRef = useRef<HTMLDivElement>(null);
 
-  // Bundle files into a single HTML blob
-  const bundleProject = () => {
-    const htmlFile = files['/index.html'];
+  const errorCount = logs.filter(log => log.level === 'error').length;
+  
+  useEffect(() => {
+    if (consoleBodyRef.current) {
+        consoleBodyRef.current.scrollTop = consoleBodyRef.current.scrollHeight;
+    }
+  }, [logs]);
+
+  const bundleProject = (entryPath: string) => {
+    const htmlFile = files[entryPath] || files['/index.html'];
     if (!htmlFile) return '<h1>No index.html found</h1>';
 
     let content = htmlFile.content;
+
+    const resolveAssetPath = (basePath: string, relativePath: string) => {
+        if (relativePath.startsWith('/') || relativePath.startsWith('http') || relativePath.startsWith('data:')) {
+            return relativePath;
+        }
+        const baseDir = basePath.substring(0, basePath.lastIndexOf('/'));
+        const stack = baseDir.split('/').filter(p => p);
+        const parts = relativePath.split('/');
+
+        for (const part of parts) {
+            if (part === '.' || part === '') continue;
+            if (part === '..') {
+                stack.pop();
+            } else {
+                stack.push(part);
+            }
+        }
+        return '/' + stack.join('/');
+    };
 
     // Inject CSS
     const cssMatches = content.match(/<link[^>]+href=["']([^"']+)["'][^>]*>/g);
     if (cssMatches) {
       cssMatches.forEach(match => {
         const hrefMatch = match.match(/href=["']([^"']+)["']/);
-        if (hrefMatch) {
-          const path = hrefMatch[1].startsWith('/') ? hrefMatch[1] : '/' + hrefMatch[1];
-          // Try to match path, handling relative paths roughly (assuming root based for this simple implementation)
-          const cssFileKey = Object.keys(files).find(k => k.endsWith(path.replace(/^\.\//, ''))); 
-          const cssFile = cssFileKey ? files[cssFileKey] : null;
-
+        if (hrefMatch && !hrefMatch[1].startsWith('http') && !hrefMatch[1].startsWith('data:')) {
+          const path = resolveAssetPath(entryPath, hrefMatch[1]);
+          const cssFile = files[path];
           if (cssFile) {
             content = content.replace(match, `<style>${cssFile.content}</style>`);
+          } else {
+            console.warn(`[Preview] CSS file not found at resolved path: ${path}`);
           }
         }
       });
@@ -43,31 +181,54 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger }) => {
     if (jsMatches) {
       jsMatches.forEach(match => {
         const srcMatch = match.match(/src=["']([^"']+)["']/);
-        if (srcMatch) {
-           const path = srcMatch[1].startsWith('/') ? srcMatch[1] : '/' + srcMatch[1];
-           const jsFileKey = Object.keys(files).find(k => k.endsWith(path.replace(/^\.\//, '')));
-           const jsFile = jsFileKey ? files[jsFileKey] : null;
-
+        if (srcMatch && !srcMatch[1].startsWith('http')) {
+           const path = resolveAssetPath(entryPath, srcMatch[1]);
+           const jsFile = files[path];
           if (jsFile) {
             content = content.replace(match, `<script>${jsFile.content}</script>`);
+          } else {
+            console.warn(`[Preview] JS file not found at resolved path: ${path}`);
           }
         }
       });
     }
 
+    // Inject interceptor script and pass the current path
+    const finalScript = navigationAndConsoleInterceptorScript.replace('%%CURRENT_PATH%%', entryPath);
+    content = content.replace('</body>', `<script>${finalScript}</script></body>`);
+
     return content;
   };
 
   useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+        if (event.source !== iframeRef.current?.contentWindow) return;
+        
+        const { type, path, level, message } = event.data;
+        if (type === 'navigate' && path) {
+            if (files[path]) {
+                onNavigate(path);
+            } else {
+                console.warn(`Preview navigation failed: file not found at path "${path}"`);
+            }
+        } else if (type === 'console') {
+            setLogs(prev => [...prev, { level, message, timestamp: Date.now() }]);
+        }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [files, onNavigate]);
+
+  useEffect(() => {
     if (!iframeRef.current) return;
     setLoading(true);
-    iframeRef.current.srcdoc = bundleProject();
-    // A short timeout to allow the iframe to start loading and prevent UI flickering
+    setLogs([]);
+    iframeRef.current.srcdoc = bundleProject(previewEntryPath);
     const timeout = setTimeout(() => {
       setLoading(false);
     }, 150);
     return () => clearTimeout(timeout);
-  }, [files, refreshTrigger]);
+  }, [files, refreshTrigger, previewEntryPath]);
 
   const getDeviceClasses = () => {
     switch (size) {
@@ -84,6 +245,27 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger }) => {
       default: return '';
     }
   }
+  
+  const handleRefresh = () => {
+    setLoading(true);
+    if (iframeRef.current) {
+        setLogs([]);
+        iframeRef.current.srcdoc = bundleProject(previewEntryPath);
+    }
+    setTimeout(() => setLoading(false), 500);
+  };
+  
+  const renderLogMessage = (args: any[]) => {
+    return args.map((arg, index) => {
+        if (arg && arg.__error) {
+            return <span key={index} className="text-red-400">{arg.stack || arg.message}</span>;
+        }
+        if (typeof arg === 'object' && arg !== null) {
+            return <pre key={index} className="text-xs">{JSON.stringify(arg, null, 2)}</pre>;
+        }
+        return <span key={index}>{String(arg)}&nbsp;</span>;
+    });
+  };
 
   return (
     <div className="h-full flex flex-col bg-sidebar border-l border-border">
@@ -113,7 +295,7 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger }) => {
           </button>
           <div className="w-px h-4 bg-gray-600 mx-1"></div>
           <button 
-            onClick={() => { setLoading(true); if (iframeRef.current) iframeRef.current.srcdoc = bundleProject(); setTimeout(()=>setLoading(false), 500); }} 
+            onClick={handleRefresh} 
             className="p-1 text-gray-400 hover:text-white"
             title="Refresh Preview"
           >
@@ -121,13 +303,11 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger }) => {
           </button>
         </div>
       </div>
-      <div className="flex-1 bg-background flex items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar">
+      <div className={`flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar transition-all duration-300 ${isConsoleOpen ? 'pb-0 md:pb-0' : ''}`}>
         
-        {/* Loading Overlay */}
         {loading && (
           <div className="absolute inset-0 z-20 bg-sidebar/80 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in">
-            <WebBenchLoader size="sm" />
-            <span className="mt-3 md:mt-4 text-xs md:text-sm font-medium text-white tracking-wide animate-pulse">Building Preview...</span>
+            <WebBenchLoader size="sm" text="Building Preview..."/>
           </div>
         )}
 
@@ -143,8 +323,44 @@ export const Preview: React.FC<PreviewProps> = ({ files, refreshTrigger }) => {
             ref={iframeRef}
             title="preview"
             className={`w-full h-full border-none bg-white ${getIframeClasses()}`}
-            sandbox="allow-scripts allow-modals"
+            sandbox="allow-scripts allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox"
           />
+        </div>
+      </div>
+      
+      {/* Console Area */}
+      <div className={`shrink-0 transition-all duration-300 ${isConsoleOpen ? 'h-48 md:h-56' : 'h-8'}`}>
+        <div className="h-full flex flex-col bg-[#252526] border-t border-border">
+          {/* Console Header */}
+          <div className="h-8 flex items-center justify-between px-3 md:px-4 border-b border-border shrink-0">
+             <div className="flex items-center gap-2">
+                <Code className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-400" />
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Console</span>
+                {errorCount > 0 && (
+                    <div className="flex items-center gap-1 bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full text-xs">
+                        <AlertTriangle className="w-3 h-3"/>
+                        <span>{errorCount}</span>
+                    </div>
+                )}
+             </div>
+             <div className="flex items-center gap-2">
+                <button onClick={() => setLogs([])} title="Clear console" className="text-gray-400 hover:text-white"><Trash2 className="w-3.5 h-3.5 md:w-4 md:h-4"/></button>
+                <button onClick={() => setIsConsoleOpen(!isConsoleOpen)} title={isConsoleOpen ? "Collapse Console" : "Expand Console"} className="text-gray-400 hover:text-white">
+                    <ChevronUp className={`w-4 h-4 md:w-5 md:h-5 transition-transform ${isConsoleOpen ? '' : 'rotate-180'}`} />
+                </button>
+             </div>
+          </div>
+          {/* Console Body */}
+          {isConsoleOpen && (
+            <div ref={consoleBodyRef} className="flex-1 overflow-y-auto custom-scrollbar p-2 text-xs font-mono">
+                {logs.map((log, i) => (
+                    <div key={i} className={`flex items-start gap-2 p-1 border-b border-white/5 ${log.level === 'error' ? 'text-red-400 bg-red-500/5' : log.level === 'warn' ? 'text-yellow-400 bg-yellow-500/5' : 'text-gray-300'}`}>
+                       <span className="text-gray-500 shrink-0 select-none">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                       <div className="flex-1 whitespace-pre-wrap break-all">{renderLogMessage(log.message)}</div>
+                    </div>
+                ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

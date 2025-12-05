@@ -165,6 +165,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
   const dragStateRef = useRef({
       isDragging: false,
       draggedPath: null as string | null,
+      dragOverPath: null as string | null,
       startX: 0,
       startY: 0
   });
@@ -413,28 +414,32 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
             while(droppableElement && !droppableElement.getAttribute('data-droppable')) {
                 droppableElement = droppableElement.parentElement;
             }
-
+            
+            let newDragOverPath: string | null = null;
             if (droppableElement) {
                 const path = droppableElement.getAttribute('data-path');
                 const draggedP = dragStateRef.current.draggedPath;
                 if (path && draggedP && path !== draggedP && !path.startsWith(draggedP + '/')) {
-                    setDragOverPath(path);
-                } else {
-                    setDragOverPath(null);
+                    newDragOverPath = path;
                 }
-            } else {
-                setDragOverPath(null);
+            }
+            
+            if (dragStateRef.current.dragOverPath !== newDragOverPath) {
+                dragStateRef.current.dragOverPath = newDragOverPath;
+                setDragOverPath(newDragOverPath);
             }
         }
     };
 
     const handleTouchEnd = () => {
-        if (dragStateRef.current.isDragging && draggedPath && dragOverPath) {
-            const sourceName = draggedPath.split('/').pop();
+        const { isDragging, draggedPath: currentDraggedPath, dragOverPath: currentDragOverPath } = dragStateRef.current;
+        
+        if (isDragging && currentDraggedPath && currentDragOverPath) {
+            const sourceName = currentDraggedPath.split('/').pop();
             if (sourceName) {
-                const newPath = dragOverPath === '/' ? `/${sourceName}` : `${dragOverPath}/${sourceName}`;
-                if (newPath !== draggedPath && !newPath.startsWith(draggedPath + '/')) {
-                    onRename(draggedPath, newPath);
+                const newPath = currentDragOverPath === '/' ? `/${sourceName}` : `${currentDragOverPath}/${sourceName}`;
+                if (newPath !== currentDraggedPath && !newPath.startsWith(currentDraggedPath + '/')) {
+                    onRename(currentDraggedPath, newPath);
                 }
             }
         }
@@ -449,6 +454,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
         setTimeout(() => {
             dragStateRef.current.isDragging = false;
             dragStateRef.current.draggedPath = null;
+            dragStateRef.current.dragOverPath = null;
         }, 50);
     };
     
@@ -456,6 +462,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFile, h
         dragStateRef.current = {
             isDragging: false,
             draggedPath: path,
+            dragOverPath: null,
             startX: e.touches[0].clientX,
             startY: e.touches[0].clientY
         };

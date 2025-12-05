@@ -7,7 +7,6 @@ interface ResetPasswordProps {
   onDone: () => void;
 }
 
-// FIX: Exported ResetPassword component as a named export.
 export const ResetPassword: React.FC<ResetPasswordProps> = ({ onDone }) => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);

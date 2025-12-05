@@ -53,6 +53,7 @@ const Editor: React.FC = () => {
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [isCreateCheckpointModalOpen, setIsCreateCheckpointModalOpen] = useState(false);
   const [isChatModalOpen, setIsChatModalOpen] = useState(false);
+  const [previewEntryPath, setPreviewEntryPath] = useState('/index.html');
   
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -95,7 +96,10 @@ const Editor: React.FC = () => {
       }
       setProject(p);
       const initialFile = p.files['/index.html'] ? '/index.html' : Object.keys(p.files)[0];
-      if (initialFile) handleFileSelect(initialFile);
+      if (initialFile) {
+        handleFileSelect(initialFile);
+        setPreviewEntryPath(p.files['/index.html'] ? '/index.html' : '/');
+      }
 
       const [loadedSessions, loadedCheckpoints] = await Promise.all([
         projectService.getChatSessions(projectId),
@@ -187,6 +191,9 @@ const Editor: React.FC = () => {
     setActiveFile(path);
     if (!openFiles.includes(path)) {
       setOpenFiles(prev => [...prev, path]);
+    }
+    if (project?.files[path]?.type === 'html') {
+        setPreviewEntryPath(path);
     }
     if (isMobile) {
       setMobileTab('editor');
@@ -984,7 +991,12 @@ const Editor: React.FC = () => {
           {((!isMobile && showPreview) || (isMobile && mobileTab === 'preview')) && (
             <div className={`bg-sidebar border-l border-border h-full flex flex-col transition-colors duration-300 ${isMobile ? 'w-full absolute inset-0 z-10' : 'md:w-2/5 lg:w-1/3 shrink-0 relative'}`}>
               {isMobile && <div className="h-9 flex items-center justify-between px-2 bg-[#1e1e1e] border-b border-[#333] shrink-0"><span className="text-xs font-bold text-gray-400 uppercase">Preview</span><button onClick={() => setMobileTab('editor')}><X className="w-3.5 h-3.5 md:w-4 md:h-4 text-gray-400"/></button></div>}
-              <Preview files={project.files} refreshTrigger={refreshTrigger} />
+              <Preview 
+                files={project.files} 
+                refreshTrigger={refreshTrigger} 
+                previewEntryPath={previewEntryPath}
+                onNavigate={setPreviewEntryPath}
+              />
             </div>
           )}
         </main>
