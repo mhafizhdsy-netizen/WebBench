@@ -8,7 +8,7 @@ import { AIChat } from '../components/editor/AIChat';
 import { Button } from '../components/ui/Button';
 import { SettingsModal } from '../components/dashboard/SettingsModal';
 import { FileExplorer } from '../components/editor/FileExplorer';
-import { generateResponseStream } from '../services/aiService'; // Updated import
+import { generateCodeStream } from '../services/geminiService';
 import { SEO } from '../components/ui/SEO';
 import { CheckpointModal } from '../components/editor/CheckpointModal';
 import { 
@@ -350,7 +350,7 @@ const Editor: React.FC = () => {
       };
       updateMessageInState(aiMsg.session_id, { ...aiMsg, ...thinkingUpdate });
 
-      const streamResponse = await generateResponseStream( prompt, project.files, activeFile, attachments, model, signal );
+      const streamResponse = await generateCodeStream( prompt, project.files, activeFile, attachments, model, signal );
       let fullText = '';
       let sources = new Map<string, string>();
       
@@ -359,7 +359,7 @@ const Editor: React.FC = () => {
 
         fullText += chunk.text || "";
 
-        const groundingChunks = (chunk as any).candidates?.[0]?.groundingMetadata?.groundingChunks;
+        const groundingChunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
         if (groundingChunks) {
           for (const g_chunk of groundingChunks) {
             if (g_chunk.web) {
