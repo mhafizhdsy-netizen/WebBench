@@ -32,6 +32,12 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup.min.js"></script>
 
+    <!-- XTerm CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" rel="stylesheet" />
+
+    <!-- Pyodide for Python Support -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+
     <script>
       tailwind.config = {
         darkMode: 'class',
@@ -164,6 +170,21 @@
               linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
           background-size: 2rem 2rem;
       }
+      
+      /* XTerm custom scrollbar matches theme */
+      .xterm-viewport::-webkit-scrollbar {
+        width: 10px;
+      }
+      .xterm-viewport::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .xterm-viewport::-webkit-scrollbar-thumb {
+        background: #424242;
+        border-radius: 0;
+      }
+      .xterm-viewport::-webkit-scrollbar-thumb:hover {
+        background: #555;
+      }
     </style>
   <script type="importmap">
 {
@@ -178,7 +199,9 @@
     "jszip": "https://aistudiocdn.com/jszip@3.10.1",
     "react-markdown": "https://esm.sh/react-markdown@9?bundle",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.0",
-    "@webcontainer/api": "https://esm.sh/@webcontainer/api@1.1.9"
+    "@webcontainer/api": "https://esm.sh/@webcontainer/api@1.1.9",
+    "xterm": "https://esm.sh/xterm@5.3.0",
+    "xterm-addon-fit": "https://esm.sh/xterm-addon-fit@0.8.0"
   }
 }
 </script>

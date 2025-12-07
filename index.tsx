@@ -2,25 +2,29 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 
-// Suppress benign ResizeObserver loop errors commonly caused by Monaco Editor.
-// This is a known issue with the library and doesn't affect functionality.
-// We patch window.onerror, console.error, and unhandled promise rejections.
-const SUPPRESSED_ERROR_MESSAGE = 'ResizeObserver loop completed with undelivered notifications';
+// Suppress benign ResizeObserver loop errors commonly caused by Monaco Editor and xterm.js.
+// These are known issues with layout thrashing in these libraries and don't affect functionality.
+const SUPPRESSED_ERROR_MESSAGES = [
+  'ResizeObserver loop completed with undelivered notifications',
+  'ResizeObserver loop limit exceeded'
+];
 
 // 1. Handle global error events (for uncaught exceptions)
 window.addEventListener('error', (e) => {
-  if (e.message && e.message.includes(SUPPRESSED_ERROR_MESSAGE)) {
+  if (e.message && SUPPRESSED_ERROR_MESSAGES.some(msg => e.message.includes(msg))) {
     // Prevent the error from reaching the console
     e.stopImmediatePropagation();
     e.preventDefault();
   }
 });
 
-// 2. Handle unhandled promise rejections (newly added for robustness)
+// 2. Handle unhandled promise rejections
 window.addEventListener('unhandledrejection', (e) => {
   const reason = e.reason;
   // The reason can be an Error object or a string. Check both.
-  if (reason && typeof reason.toString === 'function' && reason.toString().includes(SUPPRESSED_ERROR_MESSAGE)) {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  
+  if (SUPPRESSED_ERROR_MESSAGES.some(msg => message.includes(msg))) {
     // Prevent the error from reaching the console
     e.stopImmediatePropagation();
     e.preventDefault();
@@ -30,9 +34,15 @@ window.addEventListener('unhandledrejection', (e) => {
 // 3. Patch console.error (for errors logged by libraries/browsers directly)
 const originalConsoleError = console.error;
 console.error = (...args: any[]) => {
-  const shouldSuppress = args.some(arg => 
-    arg && typeof arg.toString === 'function' && arg.toString().includes(SUPPRESSED_ERROR_MESSAGE)
-  );
+  const shouldSuppress = args.some(arg => {
+    if (typeof arg === 'string') {
+      return SUPPRESSED_ERROR_MESSAGES.some(msg => arg.includes(msg));
+    }
+    if (arg instanceof Error) {
+      return SUPPRESSED_ERROR_MESSAGES.some(msg => arg.message.includes(msg));
+    }
+    return false;
+  });
 
   if (shouldSuppress) {
     // Suppress the error by not calling the original console.error

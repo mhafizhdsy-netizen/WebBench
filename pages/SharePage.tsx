@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { projectService } from '../services/projectService';
 import { Project, File } from '../types';
@@ -82,6 +82,7 @@ const SharePage: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [copyStatus, setCopyStatus] = useState(false);
+    const [previewUrl, setPreviewUrl] = useState<string>('about:blank');
 
     useEffect(() => {
         const checkAuthAndFetch = async () => {
@@ -112,6 +113,115 @@ const SharePage: React.FC = () => {
 
         checkAuthAndFetch();
     }, [projectId]);
+
+    // Build Preview Effect
+    useEffect(() => {
+        if (!project) return;
+        
+        let cleanup = () => {};
+
+        const buildPreview = () => {
+             // 1. Find Entry Point (index.html)
+            const htmlFile = (Object.values(project.files) as File[]).find(f => f.name.endsWith('.html'));
+            
+            if (!htmlFile) {
+                setPreviewUrl('about:blank');
+                return () => {};
+            }
+
+            // 2. Process Content
+            let content = htmlFile.content;
+            const blobUrls: string[] = [];
+
+            const resolvePath = (base: string, relative: string) => {
+                const stack = base.split('/').slice(0, -1);
+                const parts = relative.split('/');
+                for (const part of parts) {
+                    if (part === '.') continue;
+                    if (part === '..') stack.pop();
+                    else stack.push(part);
+                }
+                return stack.join('/') || '/';
+            }
+
+            // Replace CSS
+            content = content.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/g, (match, href) => {
+                if (href.startsWith('http') || href.startsWith('//')) return match;
+                const absPath = href.startsWith('/') ? href : resolvePath(htmlFile.path, href);
+                const file = project.files[absPath];
+                if (file) {
+                    const blob = new Blob([file.content], { type: 'text/css' });
+                    const url = URL.createObjectURL(blob);
+                    blobUrls.push(url);
+                    return match.replace(href, url);
+                }
+                return match;
+            });
+
+            // Replace JS
+            content = content.replace(/<script[^>]+src=["']([^"']+)["'][^>]*>/g, (match, src) => {
+                if (src.startsWith('http') || src.startsWith('//')) return match;
+                const absPath = src.startsWith('/') ? src : resolvePath(htmlFile.path, src);
+                const file = project.files[absPath];
+                if (file) {
+                    const blob = new Blob([file.content], { type: 'application/javascript' });
+                    const url = URL.createObjectURL(blob);
+                    blobUrls.push(url);
+                    return match.replace(src, url);
+                }
+                return match;
+            });
+            
+            // Replace Images
+            content = content.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/g, (match, src) => {
+                if (src.startsWith('http') || src.startsWith('//') || src.startsWith('data:')) return match;
+                 const absPath = src.startsWith('/') ? src : resolvePath(htmlFile.path, src);
+                 const file = project.files[absPath];
+                 if (file && file.type === 'image') {
+                     const dataUri = file.content.startsWith('data:') ? file.content : `data:image/png;base64,${file.content}`; 
+                     return match.replace(src, dataUri);
+                 }
+                 return match;
+            });
+            
+            // Basic interceptor to prevent link navigation
+             const interceptorScript = `
+                <script>
+                    document.addEventListener('click', (e) => {
+                        let target = e.target;
+                        while (target && target.tagName !== 'A') { target = target.parentElement; }
+                        if (target && target.tagName === 'A') {
+                            const href = target.getAttribute('href');
+                            if (href && !href.startsWith('#')) {
+                                e.preventDefault();
+                                console.log("Navigation prevented in preview");
+                            }
+                        }
+                    });
+                </script>
+            `;
+            
+            if (content.includes('</body>')) {
+                content = content.replace('</body>', `${interceptorScript}</body>`);
+            } else {
+                content += interceptorScript;
+            }
+
+            const finalBlob = new Blob([content], { type: 'text/html' });
+            const finalUrl = URL.createObjectURL(finalBlob);
+            
+            setPreviewUrl(finalUrl);
+
+            return () => {
+                blobUrls.forEach(url => URL.revokeObjectURL(url));
+                URL.revokeObjectURL(finalUrl);
+            };
+        };
+
+        cleanup = buildPreview();
+        return cleanup;
+
+    }, [project]);
     
     const handleCopy = () => {
         navigator.clipboard.writeText(window.location.href);
@@ -340,13 +450,13 @@ const SharePage: React.FC = () => {
                                     <div className="flex-1 text-center">
                                         <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#1e1e1e] rounded text-xs text-gray-400 font-mono border border-[#3e3e42]">
                                             <Globe className="w-3 h-3" />
-                                            preview.webbench.app
+                                            {previewUrl === 'about:blank' ? 'preview.webbench.app' : 'Live Preview'}
                                         </div>
                                     </div>
                                     <div className="w-10"></div> {/* Spacer for balance */}
                                 </div>
 
-                                {/* Fake Editor Content */}
+                                {/* Editor Content */}
                                 <div className="flex-1 flex overflow-hidden">
                                     
                                     {/* Sidebar File List */}
@@ -363,40 +473,28 @@ const SharePage: React.FC = () => {
                                     </div>
 
                                     {/* Main Code Area Placeholder */}
-                                    <div className="flex-1 bg-[#1e1e1e] p-6 relative">
-                                         
-                                         {/* Abstract Code Lines (Skeleton) */}
-                                         <div className="space-y-3 opacity-20 select-none pointer-events-none">
-                                            <div className="flex gap-3">
-                                                <div className="w-16 h-4 bg-purple-500 rounded"></div>
-                                                <div className="w-24 h-4 bg-blue-500 rounded"></div>
-                                                <div className="w-8 h-4 bg-white rounded"></div>
+                                    <div className="flex-1 bg-white relative">
+                                        {previewUrl !== 'about:blank' ? (
+                                            <iframe
+                                                src={previewUrl}
+                                                className="w-full h-full border-none bg-white"
+                                                sandbox="allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
+                                                title="Preview"
+                                            />
+                                        ) : (
+                                            <div className="flex items-center justify-center h-full text-gray-500 bg-[#1e1e1e]">
+                                                <div className="text-center">
+                                                    <Eye className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                                    <p>Preview not available for this file type.</p>
+                                                </div>
                                             </div>
-                                            <div className="w-48 h-4 bg-gray-500 rounded ml-8"></div>
-                                            <div className="w-32 h-4 bg-gray-500 rounded ml-8"></div>
-                                            <div className="w-64 h-4 bg-yellow-500 rounded ml-12"></div>
-                                            <div className="h-4"></div>
-                                            <div className="flex gap-3 ml-8">
-                                                <div className="w-20 h-4 bg-red-500 rounded"></div>
-                                                <div className="w-32 h-4 bg-green-500 rounded"></div>
-                                            </div>
-                                            <div className="w-full max-w-sm h-4 bg-gray-500 rounded ml-12"></div>
-                                            <div className="w-full max-w-xs h-4 bg-gray-500 rounded ml-12"></div>
-                                            <div className="h-4"></div>
-                                            <div className="w-24 h-4 bg-blue-500 rounded ml-8"></div>
-                                            <div className="w-full max-w-md h-4 bg-gray-500 rounded ml-12"></div>
-                                         </div>
-
-                                         {/* CTA Overlay */}
-                                         <div className="absolute inset-0 bg-gradient-to-t from-[#1e1e1e] via-[#1e1e1e]/60 to-transparent flex flex-col items-center justify-end pb-12">
-                                            <div className="text-center">
-                                                <Eye className="w-10 h-10 text-gray-600 mx-auto mb-3" />
-                                                <h3 className="text-lg font-semibold text-white mb-1">Peek inside</h3>
-                                                <p className="text-sm text-gray-500 mb-6">Open the editor to view source code and run the project.</p>
-                                                <Button onClick={() => navigate(`/editor/${project.id}`)} size="md" className="shadow-xl px-6">
-                                                    Open In Editor
-                                                </Button>
-                                            </div>
+                                        )}
+                                        
+                                        {/* CTA Overlay on hover or initially if desired, but here we just show preview directly */}
+                                         <div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none group-hover:pointer-events-auto">
+                                             <Button onClick={() => navigate(`/editor/${project.id}`)} size="lg" className="shadow-2xl pointer-events-auto transform translate-y-4 hover:translate-y-0 transition-transform">
+                                                Open Editor to Interact
+                                             </Button>
                                          </div>
                                     </div>
 

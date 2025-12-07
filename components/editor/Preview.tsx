@@ -1,9 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Project, File } from '../../types';
-import { Monitor, Smartphone, Tablet, AlertTriangle, Code, X, Terminal, Copy, Check, RefreshCw } from 'lucide-react';
+import { Project, File, LogEntry } from '../../types';
+import { Monitor, Smartphone, Tablet, AlertTriangle, X, Terminal, Copy, Check, RotateCw, Trash2, ExternalLink, RefreshCw } from 'lucide-react';
 import { WebBenchLoader } from '../ui/Loader';
 import type { StartupStatus } from '../../pages/Editor';
-import { Button } from '../ui/Button';
 
 interface PreviewProps {
   project: Project;
@@ -15,13 +14,8 @@ interface PreviewProps {
   startupStatus: StartupStatus;
   startupLog: string;
   serverUrl: string | null;
-}
-
-type LogLevel = 'log' | 'warn' | 'error';
-interface LogEntry {
-  level: LogLevel;
-  message: any[];
-  timestamp: number;
+  logs: LogEntry[];
+  onClearLogs: () => void;
 }
 
 const statusMessages: Record<StartupStatus, string> = {
@@ -36,432 +30,475 @@ const statusMessages: Record<StartupStatus, string> = {
 
 const navigationAndConsoleInterceptorScript = `
     (function() {
-        const originalConsole = { ...console };
-        const levels = ['log', 'warn', 'error', 'info', 'debug'];
-        
-        function serialize(arg) {
-            if (arg instanceof Error) return arg.message + '\\n' + (arg.stack || '');
-            if (typeof arg === 'object' && arg !== null) {
+        if (window.__webbench_intercepted) return;
+        window.__webbench_intercepted = true;
+
+        function safeSerialize(obj, depth = 0, seen = new WeakSet()) {
+            if (obj === null) return 'null';
+            if (obj === undefined) return 'undefined';
+            if (typeof obj === 'number' || typeof obj === 'boolean') return String(obj);
+            if (typeof obj === 'string') return '"' + obj + '"';
+            if (typeof obj === 'function') return '[Function: ' + (obj.name || 'anonymous') + ']';
+            if (typeof obj === 'symbol') return String(obj);
+            
+            if (depth > 2) return '[Object]'; 
+            
+            if (typeof obj === 'object') {
+                if (seen.has(obj)) return '[Circular]';
+                seen.add(obj);
+
+                if (obj instanceof Error) {
+                    return '[Error: ' + obj.message + (obj.stack ? '\\n' + obj.stack : '') + ']';
+                }
+                
+                if (Array.isArray(obj)) {
+                    return '[' + obj.map(item => safeSerialize(item, depth + 1, seen)).join(', ') + ']';
+                }
+                
+                if (obj instanceof Element) {
+                    let str = '<' + obj.tagName.toLowerCase();
+                    if (obj.id) str += ' id="' + obj.id + '"';
+                    if (obj.className) str += ' class="' + obj.className + '"';
+                    return str + '>';
+                }
+
                 try {
-                    return JSON.stringify(arg);
+                    const parts = [];
+                    for (const key in obj) {
+                        parts.push(key + ': ' + safeSerialize(obj[key], depth + 1, seen));
+                    }
+                    return '{ ' + parts.join(', ') + ' }';
                 } catch (e) {
-                    return '[Circular or Unserializable Object]';
+                    return '[Unserializable Object]';
                 }
             }
-            return String(arg);
+            return String(obj);
         }
 
-        levels.forEach(level => {
+        function postLog(level, args) {
+            try {
+                const serializedArgs = args.map(arg => {
+                    if (typeof arg === 'string') return arg;
+                    return safeSerialize(arg);
+                });
+                window.parent.postMessage({ type: 'console', level, message: serializedArgs }, '*');
+            } catch(e) {
+            }
+        }
+
+        const originalConsole = { 
+            log: console.log, 
+            warn: console.warn, 
+            error: console.error, 
+            info: console.info, 
+            debug: console.debug,
+            table: console.table,
+            group: console.group,
+            groupEnd: console.groupEnd
+        };
+
+        ['log', 'warn', 'error', 'info', 'debug', 'table'].forEach(level => {
             console[level] = (...args) => {
-                originalConsole[level](...args);
-                try {
-                    const message = args.map(serialize);
-                    window.parent.postMessage({ type: 'console', level, message }, '*');
-                } catch(e) {
-                    // ignore
-                }
+                if (originalConsole[level]) originalConsole[level].apply(console, args);
+                postLog(level === 'table' ? 'log' : level, args);
             };
         });
 
         window.addEventListener('error', (event) => {
-            window.parent.postMessage({ type: 'console', level: 'error', message: [event.message] }, '*');
-        });
+            postLog('error', [
+                event.message || 'Unknown Error', 
+                'at ' + (event.filename || 'script') + ':' + (event.lineno || '?') + ':' + (event.colno || '?')
+            ]);
+        }, true);
 
         window.addEventListener('unhandledrejection', (event) => {
-             const reason = event.reason instanceof Error ? event.reason.message : String(event.reason);
-             window.parent.postMessage({ type: 'console', level: 'error', message: ['Unhandled Promise Rejection: ' + reason] }, '*');
+             const reason = event.reason;
+             let msg = 'Unhandled Promise Rejection';
+             if (reason instanceof Error) {
+                 msg += ': ' + reason.message;
+                 if (reason.stack) msg += '\\n' + reason.stack;
+             } else {
+                 msg += ': ' + String(reason);
+             }
+             postLog('error', [msg]);
         });
 
-        // Navigation interceptor
         document.addEventListener('click', (e) => {
             let target = e.target;
             while (target && target.tagName !== 'A') { target = target.parentElement; }
             if (target && target.tagName === 'A') {
                 const href = target.getAttribute('href');
-                if (href && !href.startsWith('http') && !href.startsWith('#') && !href.startsWith('mailto:') && !href.startsWith('javascript:')) {
-                    e.preventDefault();
-                    
-                     const currentPath = '%%CURRENT_PATH%%';
-                     let basePath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
-                    if (!basePath.startsWith('/')) basePath = '/' + basePath;
-                    const dummyOrigin = 'http://webbench-preview';
-                    try {
-                        const resolvedUrl = new URL(href, dummyOrigin + basePath);
-                        const newPath = resolvedUrl.pathname;
-                        window.parent.postMessage({ type: 'navigate', path: newPath }, '*');
-                    } catch (err) {
-                        console.error('WebBench Navigation Error:', err);
-                    }
-                }
+                if (href && href.startsWith('#')) return; 
             }
-        }, true);
+        });
     })();
 `;
 
-const InstructionView = ({ projectType }: { projectType: Project['type'] }) => {
-    const [copyStatus, setCopyStatus] = useState<Record<string, boolean>>({});
-
-    const handleCopy = (command: string, id: string) => {
-        navigator.clipboard.writeText(command);
-        setCopyStatus(prev => ({ ...prev, [id]: true }));
-        setTimeout(() => setCopyStatus(prev => ({ ...prev, [id]: false })), 2000);
-    };
-
-    const getInstructions = () => {
-        switch (projectType) {
-            case 'laravel': return {
-                title: 'Laravel Project',
-                steps: [
-                    { command: 'composer install', description: 'Install PHP dependencies.' },
-                    { command: 'php artisan serve', description: 'Start the development server.' }
-                ]
-            };
-            case 'python': return {
-                title: 'Python Project',
-                steps: [{ command: 'python main.py', description: 'Execute the Python script.' }]
-            };
-            case 'php': return {
-                title: 'PHP Project',
-                steps: [{ command: 'php -S localhost:8000', description: 'Start the built-in PHP server.' }]
-            };
-            case 'cpp': return {
-                title: 'C++ Project',
-                steps: [
-                    { command: 'g++ main.cpp -o main', description: 'Compile the source code.' },
-                    { command: './main', description: 'Run the compiled executable.' }
-                ]
-            };
-            default: return null;
-        }
-    };
-
-    const instructions = getInstructions();
-    if (!instructions) return null;
-
-    return (
-        <div className="h-full flex flex-col items-center justify-center bg-background text-gray-300 p-4 text-center">
-            <Terminal className="w-12 h-12 text-accent mb-4" />
-            <h3 className="text-xl font-bold text-white mb-2">{instructions.title}</h3>
-            <p className="text-sm text-gray-500 mb-6">This project type runs locally. Follow these steps in your terminal:</p>
-            <div className="w-full max-w-md space-y-3">
-                {instructions.steps.map((step, index) => (
-                    <div key={index} className="text-left">
-                        <p className="text-xs text-gray-400 mb-1 ml-1">{index + 1}. {step.description}</p>
-                        <div className="flex items-center gap-2 bg-sidebar p-3 rounded-lg border border-border">
-                            <span className="text-green-400 font-mono text-sm flex-1 overflow-x-auto no-scrollbar">$ {step.command}</span>
-                            <button onClick={() => handleCopy(step.command, `cmd-${index}`)} className="p-2 rounded-md hover:bg-active text-gray-400 hover:text-white transition-colors">
-                                {copyStatus[`cmd-${index}`] ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-                            </button>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};
-
 export const Preview: React.FC<PreviewProps> = ({ 
-    project, refreshTrigger, previewEntryPath, onNavigate, isMobile, onClose,
-    startupStatus, startupLog, serverUrl 
+  project, 
+  refreshTrigger, 
+  previewEntryPath, 
+  onNavigate,
+  isMobile,
+  onClose,
+  startupStatus,
+  startupLog,
+  serverUrl,
+  logs,
+  onClearLogs
 }) => {
+  const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
+  const [key, setKey] = useState(0);
+  const [showConsole, setShowConsole] = useState(false);
+  const [iframeUrl, setIframeUrl] = useState<string>('about:blank');
+  const [loading, setLoading] = useState(true);
+  
+  // Scaling state
+  const [scale, setScale] = useState(1);
+  const [targetDimensions, setTargetDimensions] = useState({ width: '100%', height: '100%' });
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [size, setSize] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
-  const [loading, setLoading] = useState(false);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<'console' | 'terminal'>('terminal');
-  const [showPanel, setShowPanel] = useState(false);
-  const [internalRefreshTrigger, setInternalRefreshTrigger] = useState(0);
-  const consoleBodyRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const consoleEndRef = useRef<HTMLDivElement>(null);
   
-  const isStatic = !project.type || project.type === 'starter' || project.type === 'blank';
-  const isRunnable = project.type === 'react-vite' || project.type === 'nextjs';
-  const isInstructional = !isStatic && !isRunnable;
-  
-  const errorCount = logs.filter(log => log.level === 'error').length;
+  const isWebContainer = project.type === 'react-vite' || project.type === 'nextjs';
 
+  // --- Calculate Scale for Device Simulation ---
   useEffect(() => {
-    console.log('[WebContainer Diagnostic]', {
-      crossOriginIsolated: window.crossOriginIsolated,
-      hasSharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
-      browser: navigator.userAgent
-    });
-  }, []);
-  
-  useEffect(() => {
-    if ((activeTab === 'console' && consoleBodyRef.current)) {
-        consoleBodyRef.current.scrollTop = consoleBodyRef.current.scrollHeight;
-    }
-  }, [logs, activeTab, showPanel]);
+    const calculateScale = () => {
+        if (!containerRef.current) return;
+        const containerWidth = containerRef.current.clientWidth;
+        // const containerHeight = containerRef.current.clientHeight; // Not used for now
+        
+        // Mobile needs less padding to maximize screen real estate
+        const hPadding = isMobile ? 8 : 40; 
 
-  const getMimeType = (fileType: string) => {
-    switch (fileType) {
-        case 'html': return 'text/html';
-        case 'css': return 'text/css';
-        case 'javascript': return 'application/javascript';
-        case 'json': return 'application/json';
-        case 'image': return 'image/png'; 
-        default: return 'text/plain';
-    }
-  };
+        const availableWidth = Math.max(containerWidth - hPadding, 100);
+        
+        let targetW: number | string = availableWidth;
+        let targetH: number | string = '100%';
 
-  const bundleProject = (entryPath: string) => {
-    const htmlFile = project.files[entryPath] || project.files['/index.html'];
-    if (!htmlFile) return '<h1>No index.html found</h1>';
-    let content = htmlFile.content;
-    
-    // Improved regex to handle src/href with proper quoting and path capture
-    // Matches: src="...", href='...', src = "..."
-    // Ignores: http://, https://, data:, blob:, mailto:, #
-    const regex = /(href|src)\s*=\s*(["'])(?!\w+:\/\/|#|mailto:)([^"']+)\2/g;
-    
-    // Helper to safe encode text to Base64
-    const toBase64 = (str: string) => {
-        try {
-            return btoa(unescape(encodeURIComponent(str)));
-        } catch (e) {
-            console.error("Base64 encode failed", e);
-            return "";
+        if (device === 'mobile') {
+            targetW = 375;
+            targetH = 667;
+        } else if (device === 'tablet') {
+            targetW = 768;
+            targetH = 1024;
+        } else if (device === 'desktop') {
+             // Simulate desktop on smaller screens
+             // We set a minimum effective width for desktop view
+             if (availableWidth < 1024) {
+                 targetW = 1024;
+                 targetH = '100%'; 
+             } else {
+                 targetW = '100%';
+                 targetH = '100%';
+             }
         }
+        
+        // Calculate numeric target width for scaling
+        const numericTargetW = typeof targetW === 'number' ? targetW : availableWidth;
+
+        let newScale = 1;
+        // Only scale down if the target is larger than available space
+        if (numericTargetW > availableWidth) {
+             newScale = availableWidth / numericTargetW;
+        }
+
+        // Apply dimensions
+        setTargetDimensions({ 
+            width: typeof targetW === 'number' ? `${targetW}px` : targetW, 
+            height: typeof targetH === 'number' ? `${targetH}px` : targetH 
+        });
+        setScale(newScale);
     };
 
-    content = content.replace(regex, (match, attr, quote, path) => {
-        // Robust relative path resolution
-        let fullPath = path;
-        try {
-            const dummyOrigin = 'http://webbench-dummy';
-            const basePath = entryPath.startsWith('/') ? entryPath : '/' + entryPath;
-            // Create a base URL from the current entry file
-            const contextUrl = new URL(basePath, dummyOrigin);
-            // Resolve the relative path against the entry file
-            const resolvedUrl = new URL(path, contextUrl);
-            fullPath = resolvedUrl.pathname;
-        } catch (e) {
-            // Fallback for simple paths if URL parsing fails
-             if (!fullPath.startsWith('/')) fullPath = '/' + fullPath;
-        }
+    calculateScale();
+    window.addEventListener('resize', calculateScale);
+    return () => window.removeEventListener('resize', calculateScale);
+  }, [device, isMobile]);
 
-        // Try to find the file in the project (try with and without leading slash)
-        let file = project.files[fullPath];
-        if (!file && fullPath.startsWith('/') && project.files[fullPath.substring(1)]) {
-            file = project.files[fullPath.substring(1)];
-        }
+  // --- Console Scroll Effect ---
+  useEffect(() => {
+    if (showConsole && consoleEndRef.current) {
+        consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs, showConsole]);
 
-        if (!file) return match; // File not found, leave as is (will 404 in iframe)
+  // --- Build Static Preview ---
+  const buildStaticPreview = () => {
+    if (!project) return;
+    setLoading(true);
 
-        if (file.type === 'html') return match; // Don't inline HTML links
-
-        const mimeType = getMimeType(file.type);
-        
-        // Use Data URIs strictly (no Blob URLs) to avoid sandbox restrictions
-        let base64Content = "";
-        
-        if (file.type === 'image') {
-             // Images are assumed to be base64 if imported/uploaded correctly
-             // If it's a raw string from editor, this might fail, but standard flow handles this
-             base64Content = file.content;
+    // 1. Find Entry Point
+    let entryFile = project.files[previewEntryPath];
+    if (!entryFile) {
+        const htmlFile = (Object.values(project.files) as File[]).find(f => f.name.endsWith('.html'));
+        if (htmlFile) {
+            entryFile = htmlFile;
+            onNavigate(htmlFile.path);
         } else {
-             // Encode text files (CSS, JS)
-             base64Content = toBase64(file.content);
+            setIframeUrl('about:blank'); 
+            setLoading(false);
+            return;
         }
-        
-        return `${attr}=${quote}data:${mimeType};base64,${base64Content}${quote}`;
+    }
+
+    // 2. Process Content
+    let content = entryFile.content;
+    const blobUrls: string[] = [];
+
+    const resolvePath = (base: string, relative: string) => {
+        const stack = base.split('/').slice(0, -1);
+        const parts = relative.split('/');
+        for (const part of parts) {
+            if (part === '.') continue;
+            if (part === '..') stack.pop();
+            else stack.push(part);
+        }
+        return stack.join('/') || '/';
+    }
+
+    // Replace CSS
+    content = content.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/g, (match, href) => {
+        if (href.startsWith('http') || href.startsWith('//')) return match;
+        const absPath = href.startsWith('/') ? href : resolvePath(entryFile.path, href);
+        const file = project.files[absPath];
+        if (file) {
+            const blob = new Blob([file.content], { type: 'text/css' });
+            const url = URL.createObjectURL(blob);
+            blobUrls.push(url);
+            return match.replace(href, url);
+        }
+        return match;
     });
 
-    // Inject interceptor at the start of HEAD to catch early logs and errors
-    const interceptor = `<script>${navigationAndConsoleInterceptorScript.replace('%%CURRENT_PATH%%', entryPath)}</script>`;
+    // Replace JS
+    content = content.replace(/<script[^>]+src=["']([^"']+)["'][^>]*>/g, (match, src) => {
+        if (src.startsWith('http') || src.startsWith('//')) return match;
+        const absPath = src.startsWith('/') ? src : resolvePath(entryFile.path, src);
+        const file = project.files[absPath];
+        if (file) {
+            const blob = new Blob([file.content], { type: 'application/javascript' });
+            const url = URL.createObjectURL(blob);
+            blobUrls.push(url);
+            return match.replace(src, url);
+        }
+        return match;
+    });
+    
+    // Replace Images
+    content = content.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/g, (match, src) => {
+        if (src.startsWith('http') || src.startsWith('//') || src.startsWith('data:')) return match;
+         const absPath = src.startsWith('/') ? src : resolvePath(entryFile.path, src);
+         const file = project.files[absPath];
+         if (file && file.type === 'image') {
+             const dataUri = file.content.startsWith('data:') ? file.content : `data:image/png;base64,${file.content}`; 
+             return match.replace(src, dataUri);
+         }
+         return match;
+    });
+
+    // Inject Interceptor Script
+    const scriptBlob = new Blob([navigationAndConsoleInterceptorScript], { type: 'application/javascript' });
+    const scriptUrl = URL.createObjectURL(scriptBlob);
+    blobUrls.push(scriptUrl);
+    
+    // Check if head exists, if not add it
     if (content.includes('<head>')) {
-        content = content.replace('<head>', `<head>${interceptor}`);
-    } else if (content.includes('<html>')) {
-         content = content.replace('<html>', `<html><head>${interceptor}</head>`);
+        content = content.replace('<head>', `<head><script src="${scriptUrl}"></script>`);
     } else {
-        content = interceptor + content;
+        content = `<script src="${scriptUrl}"></script>` + content;
     }
 
-    return content;
-  };
+    const finalBlob = new Blob([content], { type: 'text/html' });
+    const finalUrl = URL.createObjectURL(finalBlob);
+    
+    setIframeUrl(finalUrl);
+    setLoading(false);
 
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-        if (!isStatic || event.source !== iframeRef.current?.contentWindow) return;
-        const { type, path, level, message } = event.data;
-        if (type === 'navigate' && path) onNavigate(path);
-        else if (type === 'console') setLogs(prev => [...prev, { level, message, timestamp: Date.now() }]);
+    return () => {
+        blobUrls.forEach(url => URL.revokeObjectURL(url));
+        URL.revokeObjectURL(finalUrl);
     };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [project.files, onNavigate, isStatic]);
-  
-  // Static project refresh logic
+  };
+
   useEffect(() => {
-    if (!iframeRef.current) return;
-    
-    if (isStatic) {
-        setLoading(true);
-        setLogs([]);
-        // Use srcdoc with bundled content (Data URIs)
-        // This avoids local resource loading issues entirely
-        iframeRef.current.srcdoc = bundleProject(previewEntryPath);
-        const timeout = setTimeout(() => setLoading(false), 150);
-        return () => clearTimeout(timeout);
-    } else if (isRunnable && serverUrl) {
-        // For runnable, we reload the iframe if specific refresh was requested
-        // But mainly standard refresh is handled by WebContainer HMR usually.
-        // If this is a manual refresh:
-        iframeRef.current.src = serverUrl;
-    }
-  }, [project.files, refreshTrigger, internalRefreshTrigger, previewEntryPath, isStatic, serverUrl, isRunnable]);
-  
-  const handleManualRefresh = () => {
-    setInternalRefreshTrigger(prev => prev + 1);
-  };
-
-  const getDeviceClasses = () => {
-    switch(size) {
-      case 'mobile': return 'w-[375px] h-[667px] shadow-2xl rounded-2xl border-4 border-gray-700';
-      case 'tablet': return 'w-[768px] h-[1024px] shadow-2xl rounded-2xl border-4 border-gray-700';
-      default: return 'w-full h-full';
-    }
-  };
-
-  const renderLogMessage = (args: any[]) => {
-    return args.map((arg, i) => {
-      try {
-        const content = JSON.parse(arg);
-        if (typeof content === 'object') return <pre key={i} className="text-xs whitespace-pre-wrap break-all">{JSON.stringify(content, null, 2)}</pre>;
-        return <span key={i}>{content.toString()} </span>;
-      } catch (e) {
-        return <span key={i}>{arg} </span>;
+      if (isWebContainer) {
+          if (serverUrl) {
+              setIframeUrl(serverUrl);
+              setLoading(false);
+          } else {
+              setLoading(true);
+          }
+      } else {
+          const cleanup = buildStaticPreview();
+          return () => {
+              if (cleanup) cleanup();
+          }
       }
-    });
+  }, [project, refreshTrigger, previewEntryPath, serverUrl, isWebContainer]);
+
+  const handleRefresh = () => {
+      setKey(k => k + 1);
+      onClearLogs();
   };
 
-  const renderContent = () => {
-    if (isInstructional) {
-      return <InstructionView projectType={project.type} />;
-    }
-    
-    if (isRunnable) {
-        const showLoadingOverlay = startupStatus !== 'running' && startupStatus !== 'idle';
-        return (
-             <div className="flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar relative">
-                {showLoadingOverlay && (
-                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm text-center p-4">
-                        {startupStatus === 'error' ? (
-                             <>
-                                <AlertTriangle className="w-10 h-10 text-red-400 mb-4" />
-                                <p className="font-semibold text-red-300 mb-2">WebContainer failed to start.</p>
-                                <p className="text-xs text-gray-400 mb-4">Check the browser console (DevTools) and startup log for more details.</p>
-                                <Button onClick={() => window.location.reload()} size="sm">
-                                    Retry
-                                </Button>
-                             </>
-                        ) : (
-                            <>
-                                <WebBenchLoader size="md" />
-                                <p className="mt-4 text-sm text-gray-400">{statusMessages[startupStatus]}</p>
-                            </>
-                        )}
-                    </div>
-                )}
-                 <iframe ref={iframeRef} src={serverUrl || 'about:blank'} title="preview" className="w-full h-full border-none bg-white rounded-lg" sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" />
-             </div>
-        );
-    }
-    
-    // isStatic
-    return (
-      <div className="flex-1 bg-background flex flex-col items-center justify-center overflow-auto p-3 md:p-4 custom-scrollbar relative">
-        {loading && <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/50"><WebBenchLoader size="md"/></div>}
-        <div className={`transition-all duration-300 overflow-hidden relative z-10 shrink-0 ${getDeviceClasses()}`}>
-          <iframe ref={iframeRef} title="preview" className={`w-full h-full border-none bg-white ${size === 'desktop' ? 'rounded-lg' : 'rounded-sm'}`} sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin" />
-        </div>
-      </div>
-    );
+  const copyLog = (msg: any[]) => {
+      const text = msg.map(m => typeof m === 'string' ? m : JSON.stringify(m)).join(' ');
+      navigator.clipboard.writeText(text);
   };
+
+  const getStatusColor = (status: StartupStatus) => {
+      switch(status) {
+          case 'running': return 'text-green-400';
+          case 'error': return 'text-red-400';
+          default: return 'text-yellow-400';
+      }
+  };
+
+  const errorCount = logs.filter(l => l.level === 'error').length;
+  const warnCount = logs.filter(l => l.level === 'warn').length;
 
   return (
-    <div className="h-full flex flex-col bg-sidebar border-l border-border">
-      <div className="h-9 px-3 md:px-4 flex items-center justify-between border-b border-border">
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Preview</span>
+    <div className="flex flex-col h-full bg-[#1e1e1e] border-l border-border relative">
+      {/* Mobile Header / Close */}
+      {isMobile && onClose && (
+        <div className="flex items-center justify-between p-2 bg-sidebar border-b border-border shrink-0">
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Preview</span>
+            <button onClick={onClose} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white">
+                <X className="w-5 h-5" />
+            </button>
         </div>
-        <div className="flex items-center gap-1.5 md:gap-2">
-            {isStatic && (
-                <>
-                    <button onClick={() => setSize('mobile')} className={`p-1 rounded ${size === 'mobile' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} title="Mobile View"><Smartphone className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
-                    <button onClick={() => setSize('tablet')} className={`p-1 rounded ${size === 'tablet' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} title="Tablet View"><Tablet className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
-                    <button onClick={() => setSize('desktop')} className={`p-1 rounded ${size === 'desktop' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} title="Desktop View"><Monitor className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
-                    <div className="w-px h-4 bg-gray-600 mx-1"></div>
-                </>
-            )}
+      )}
 
-            {/* Console Toggle */}
-            <button 
-                onClick={() => setShowPanel(!showPanel)} 
-                className={`p-1 rounded relative ${showPanel ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} 
-                title="Toggle Console"
-            >
-                <Code className="w-3.5 h-3.5 md:w-4 md:h-4" />
-                {!showPanel && errorCount > 0 && (
-                     <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-                )}
+      {/* Toolbar */}
+      <div className="flex items-center justify-between p-2 border-b border-border bg-[#252526] shrink-0 gap-2">
+        <div className="flex items-center gap-1 bg-[#1e1e1e] rounded p-0.5 border border-border shrink-0">
+          <button onClick={() => setDevice('desktop')} className={`p-1.5 rounded ${device === 'desktop' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} title="Desktop (1024px+)">
+            <Monitor className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={() => setDevice('tablet')} className={`p-1.5 rounded ${device === 'tablet' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} title="Tablet (768px)">
+            <Tablet className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={() => setDevice('mobile')} className={`p-1.5 rounded ${device === 'mobile' ? 'bg-active text-white' : 'text-gray-400 hover:text-white'}`} title="Mobile (375px)">
+            <Smartphone className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="flex-1 min-w-0 flex justify-center">
+          <div className={`bg-[#1e1e1e] border border-border rounded flex items-center px-2 py-1 text-xs text-gray-400 h-7 ${isMobile ? 'w-full' : 'w-full max-w-sm'}`}>
+             <span className="truncate w-full text-center">
+                {loading ? 'Loading...' : (iframeUrl === 'about:blank' ? 'No preview' : iframeUrl)}
+             </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+            <button onClick={handleRefresh} className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-white" title="Refresh">
+                <RefreshCw className="w-3.5 h-3.5" />
             </button>
-
-             {/* Refresh Button */}
-             <button 
-                onClick={handleManualRefresh} 
-                className="p-1 rounded text-gray-400 hover:text-white hover:bg-white/10" 
-                title="Refresh Preview"
-            >
-                <RefreshCw className="w-3.5 h-3.5 md:w-4 md:h-4" />
+             <button onClick={() => setShowConsole(!showConsole)} className={`relative p-1.5 rounded hover:bg-white/10 ${showConsole ? 'text-accent bg-accent/10' : 'text-gray-400 hover:text-white'}`} title="Toggle Console">
+                <Terminal className="w-3.5 h-3.5" />
+                {errorCount > 0 && <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>}
             </button>
-
-            {/* Close Button (Mobile only logic passed from parent usually, or generic close) */}
-            {isMobile && onClose && (
-                <button onClick={onClose} className="p-1 text-gray-400 hover:text-white hover:bg-white/10 rounded" title="Close Preview">
-                    <X className="w-3.5 h-3.5 md:w-4 md:h-4" />
-                </button>
-            )}
+            <a href={iframeUrl} target="_blank" rel="noopener noreferrer" className={`p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-white ${iframeUrl === 'about:blank' ? 'pointer-events-none opacity-50' : ''}`} title="Open in New Tab">
+                <ExternalLink className="w-3.5 h-3.5" />
+            </a>
         </div>
       </div>
-      
-      <div className="flex-1 flex flex-col min-h-0">
-        {renderContent()}
-        
-        {/* Bottom Panel (Logs/Console) */}
-        {showPanel && (
-            <div className={`flex flex-col bg-sidebar border-t border-border shrink-0 h-48 animate-in slide-in-from-bottom-5 duration-200`}>
-                <div className="flex items-center border-b border-border">
-                    {isRunnable && <button onClick={() => setActiveTab('terminal')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'terminal' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}><Terminal className="w-3.5 h-3.5"/> Startup Log</button>}
-                    <button onClick={() => setActiveTab('console')} className={`px-3 py-1.5 text-xs flex items-center gap-2 ${activeTab === 'console' ? 'bg-active text-white' : 'text-gray-400 hover:bg-active/50'}`}>
-                        <Code className="w-3.5 h-3.5"/> Console
-                        {errorCount > 0 && <div className="flex items-center gap-1 rounded-full text-xs px-1.5 bg-red-500/20 text-red-400"><AlertTriangle className="w-3 h-3"/>{errorCount}</div>}
-                    </button>
-                    <div className="ml-auto px-2">
-                        <button onClick={() => setShowPanel(false)} className="text-gray-500 hover:text-white"><X className="w-3 h-3"/></button>
-                    </div>
-                </div>
-                <div className="flex-1 overflow-auto custom-scrollbar">
-                    {activeTab === 'console' && (
-                        <div ref={consoleBodyRef} className="p-2 text-xs font-mono">
-                            {logs.length === 0 && <div className="text-gray-500 italic p-2">No logs yet. Interact with the preview to see output.</div>}
-                            {logs.map((log, i) => (
-                                <div key={i} className={`flex items-start gap-2 py-1 border-b border-border/50 ${log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-yellow-400' : 'text-gray-300'}`}>
-                                    <span className="opacity-60">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                                    <div className="flex-1 break-words">{renderLogMessage(log.message)}</div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                    {activeTab === 'terminal' && isRunnable && (
-                        <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-all h-full">
-                            {startupLog}
-                        </pre>
-                    )}
-                </div>
+
+      {/* Main Area */}
+      <div ref={containerRef} className="flex-1 bg-[#111] relative overflow-hidden flex flex-col items-center justify-start p-2 md:p-4 origin-top">
+        {loading || (isWebContainer && startupStatus !== 'running') ? (
+            <div className="flex flex-col items-center justify-center h-full text-center">
+                 <WebBenchLoader size="lg" />
+                 {isWebContainer && (
+                     <div className="mt-4 max-w-xs mx-auto">
+                        <p className={`text-sm font-medium mb-2 ${getStatusColor(startupStatus)}`}>
+                            {statusMessages[startupStatus]}
+                        </p>
+                        {startupStatus === 'error' && (
+                            <div className="bg-red-500/10 border border-red-500/20 p-2 rounded text-xs text-red-300 text-left max-h-40 overflow-auto custom-scrollbar">
+                                <pre>{startupLog}</pre>
+                            </div>
+                        )}
+                        {startupStatus !== 'error' && startupStatus !== 'running' && (
+                            <div className="text-xs text-gray-500 font-mono text-left max-h-20 overflow-hidden relative">
+                                <pre>{startupLog.split('\n').slice(-3).join('\n')}</pre>
+                                <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-[#111] to-transparent"></div>
+                            </div>
+                        )}
+                     </div>
+                 )}
             </div>
+        ) : (
+             <div 
+                className="bg-white transition-all duration-300 shadow-2xl overflow-hidden relative origin-top"
+                style={{ 
+                    width: targetDimensions.width,
+                    height: targetDimensions.height,
+                    maxWidth: 'none',
+                    borderRadius: device !== 'desktop' || scale < 1 ? '8px' : '0',
+                    border: device !== 'desktop' || scale < 1 ? '1px solid #333' : 'none',
+                    transform: `scale(${scale})`,
+                }}
+             >
+                 <iframe
+                    key={key}
+                    ref={iframeRef}
+                    src={iframeUrl}
+                    className="w-full h-full bg-white"
+                    sandbox="allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts allow-top-navigation-by-user-activation"
+                    title="Preview"
+                 />
+             </div>
         )}
       </div>
+
+      {/* Console Panel */}
+      {showConsole && (
+          <div className="h-48 md:h-64 bg-[#111] border-t border-border flex flex-col animate-in slide-in-from-bottom-10 z-10 absolute bottom-0 left-0 right-0 shadow-2xl">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-[#1e1e1e] border-b border-border shrink-0">
+                  <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold text-gray-400 uppercase">Console</span>
+                      {errorCount > 0 && <span className="text-[10px] bg-red-900/40 text-red-400 px-1.5 py-0.5 rounded border border-red-500/20">{errorCount} Errors</span>}
+                      {warnCount > 0 && <span className="text-[10px] bg-yellow-900/40 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-500/20">{warnCount} Warnings</span>}
+                  </div>
+                  <div className="flex gap-2">
+                       <button onClick={onClearLogs} className="text-gray-500 hover:text-white p-1" title="Clear Console"><Trash2 className="w-3.5 h-3.5" /></button>
+                       <button onClick={() => setShowConsole(false)} className="text-gray-500 hover:text-white p-1"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2 font-mono text-xs space-y-1 custom-scrollbar">
+                  {logs.length === 0 && <div className="text-gray-600 italic px-2">No logs yet...</div>}
+                  {logs.map((log, i) => (
+                      <div key={i} className={`flex items-start gap-2 px-2 py-1.5 hover:bg-white/5 group border-b border-white/5 ${log.level === 'error' ? 'bg-red-500/5' : ''}`}>
+                           {log.level === 'error' && <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />}
+                           {log.level === 'warn' && <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 shrink-0 mt-0.5" />}
+                           {(log.level === 'info' || log.level === 'log') && <Check className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />}
+                           
+                           <div className={`flex-1 break-all whitespace-pre-wrap ${
+                               log.level === 'error' ? 'text-red-400' : 
+                               log.level === 'warn' ? 'text-yellow-400' : 
+                               log.level === 'info' ? 'text-blue-400' : 'text-gray-300'
+                           }`}>
+                               {log.message.map((m, idx) => (
+                                   <span key={idx} className="mr-2 opacity-90">{typeof m === 'object' ? JSON.stringify(m, null, 2) : String(m)}</span>
+                               ))}
+                           </div>
+                           <button 
+                             onClick={() => copyLog(log.message)}
+                             className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded text-gray-500 hover:text-white transition-opacity"
+                           >
+                               <Copy className="w-3 h-3" />
+                           </button>
+                      </div>
+                  ))}
+                  <div ref={consoleEndRef} />
+              </div>
+          </div>
+      )}
     </div>
   );
 };

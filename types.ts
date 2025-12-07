@@ -1,3 +1,4 @@
+
 export interface File {
   path: string;
   name: string;
@@ -79,4 +80,29 @@ export interface User {
   id: string;
   email: string;
   name: string;
+}
+
+export interface GitState {
+  branch: string;
+  unstagedFiles: string[];
+  stagedFiles: string[];
+  commits: Commit[];
+  remoteUrl: string | null;
+}
+
+export interface Commit {
+  id: string;
+  message: string;
+  author: string;
+  timestamp: number;
+  files: Record<string, File>;
+}
+
+export type LogLevel = 'log' | 'warn' | 'error' | 'info' | 'debug';
+
+export interface LogEntry {
+  level: LogLevel;
+  message: any[];
+  timestamp: number;
+  count?: number;
 }

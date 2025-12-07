@@ -98,6 +98,7 @@ interface EditorSettings {
   minimap: boolean;
   lineNumbers: 'on' | 'off';
   formatOnType: boolean;
+  autoSave: boolean;
 }
 
 interface SettingsContextType {
@@ -123,7 +124,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       wordWrap: 'on',
       minimap: true,
       lineNumbers: 'on',
-      formatOnType: true
+      formatOnType: true,
+      autoSave: true
     };
   });
 

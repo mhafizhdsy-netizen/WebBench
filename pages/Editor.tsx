@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { projectService } from '../services/projectService';
-import { Project, File as ProjectFile, PanelType, ChatMessage, ChatSession, Checkpoint, FileAction } from '../types';
+import { Project, File as ProjectFile, PanelType, ChatMessage, ChatSession, Checkpoint, FileAction, LogEntry } from '../types';
 import { CodeEditor } from '../components/editor/CodeEditor';
 import { Preview } from '../components/editor/Preview';
 import { AIChat } from '../components/editor/AIChat';
@@ -11,22 +11,22 @@ import { FileExplorer } from '../components/editor/FileExplorer';
 import { generateCodeStream } from '../services/geminiService';
 import { SEO } from '../components/ui/SEO';
 import { CheckpointModal } from '../components/editor/CheckpointModal';
+import { GitPanel } from '../components/editor/GitPanel';
 import { 
   Menu, Save, ArrowLeft, Layout, MessageSquare, Play, Download, 
   Loader2, Cloud, Settings, Files, Search, Sparkles, X, LayoutTemplate,
-  AlertTriangle, Check, CloudOff, AlertCircle, TerminalSquare
+  AlertTriangle, Check, CloudOff, AlertCircle, TerminalSquare, GitBranch
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { ActionModal } from '../components/dashboard/ActionModal';
 import { WebContainer } from '@webcontainer/api';
 import { TerminalPanel } from '../components/editor/TerminalPanel';
+import { useSettings } from '../context/ThemeContext';
 
-type SidebarView = 'files' | 'search';
+type SidebarView = 'files' | 'search' | 'git';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 export type StartupStatus = 'idle' | 'booting' | 'mounting' | 'installing' | 'starting' | 'running' | 'error';
 
-// Regex to match a complete file code block including the path comment
-// This will be used to strip them from the final markdown content display
 const FILE_CODE_BLOCK_FULL_REGEX = /```[a-zA-Z]*\s*\n(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)[\s\S]*?```/g;
 
 const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
@@ -40,7 +40,7 @@ const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) =
     });
 };
 
-const WEBCONTAINER_BOOT_TIMEOUT = 30000; // 30 seconds
+const WEBCONTAINER_BOOT_TIMEOUT = 30000;
 
 const Editor: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -70,9 +70,9 @@ const Editor: React.FC = () => {
   const [isChatModalOpen, setIsChatModalOpen] = useState(false);
   const [previewEntryPath, setPreviewEntryPath] = useState('/index.html');
   
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [consoleLogs, setConsoleLogs] = useState<LogEntry[]>([]);
 
-  // State for draggable/resizable modal
+  const abortControllerRef = useRef<AbortController | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const [modalPosition, setModalPosition] = useState({ x: 0, y: 0 });
   const [modalSize, setModalSize] = useState({ width: 0, height: 0 });
@@ -84,7 +84,6 @@ const Editor: React.FC = () => {
   const resizeHandleRef = useRef<string | null>(null);
   const firstOpen = useRef(true);
 
-  // --- WebContainer and Terminal State ---
   const [webcontainerInstance, setWebcontainerInstance] = useState<WebContainer | null>(null);
   const [startupStatus, setStartupStatus] = useState<StartupStatus>('idle');
   const [startupLog, setStartupLog] = useState('');
@@ -93,19 +92,34 @@ const Editor: React.FC = () => {
   const [terminalHeight, setTerminalHeight] = useState(250);
   const isTerminalResizingRef = useRef(false);
   const previousFilesRef = useRef<Record<string, ProjectFile> | undefined>(undefined);
+  
+  const { editorSettings } = useSettings();
 
   useEffect(() => {
     const handleResize = () => {
       const newIsMobile = window.innerWidth < 768;
       if (newIsMobile !== isMobile) {
         setIsMobile(newIsMobile);
-        // Automatically close sidebar when switching to mobile, open on desktop
         setIsSidebarOpen(!newIsMobile);
       }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [isMobile]);
+
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'console') {
+        setConsoleLogs(prev => [...prev, {
+          level: e.data.level,
+          message: e.data.message,
+          timestamp: Date.now()
+        }]);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   const loadInitialData = useCallback(async () => {
     if (!projectId) {
@@ -162,14 +176,15 @@ const Editor: React.FC = () => {
     return process.exit;
   }, []);
 
-  // --- WebContainer Lifecycle Effect ---
   useEffect(() => {
-    const isRunnable = project?.type === 'react-vite' || project?.type === 'nextjs';
+    const isWebType = project?.type === 'react-vite' || project?.type === 'nextjs';
     let wcInstance: WebContainer | null = null;
     let isTornDown = false;
     let bootTimeoutId: number | undefined;
 
-    if (!isRunnable) {
+    if (!isWebType) {
+      // For non-web types (Python, PHP), we don't boot WebContainer.
+      // We rely on TerminalPanel to handle Pyodide/PHP-Wasm logic.
       if (webcontainerInstance) webcontainerInstance.teardown();
       setWebcontainerInstance(null);
       setStartupStatus('idle');
@@ -185,7 +200,6 @@ const Editor: React.FC = () => {
       try {
         setStartupStatus('booting');
         onData('>>> Booting WebContainer...\n');
-        console.log('[WebContainer] Booting...');
 
         const bootPromise = WebContainer.boot();
         const timeoutPromise = new Promise((_, reject) => {
@@ -201,7 +215,6 @@ const Editor: React.FC = () => {
 
         if (isTornDown) return wcInstance.teardown();
         setWebcontainerInstance(wcInstance);
-        console.log('[WebContainer] Booted successfully.');
         
         wcInstance.on('error', (err) => {
           console.error("WebContainer runtime error:", err);
@@ -213,12 +226,10 @@ const Editor: React.FC = () => {
           setServerUrl(url);
           setStartupStatus('running');
           onData(`\n[INFO] Server is live at ${url}\n`);
-           console.log(`[WebContainer] Server ready at ${url}`);
         });
 
         setStartupStatus('mounting');
         onData('>>> Mounting files...\n');
-        console.log('[WebContainer] Mounting files...');
         const filesForWC = Object.values(project.files).reduce((acc, file: ProjectFile) => {
           if (file.name !== '.keep') {
             const path = file.path.startsWith('/') ? file.path.substring(1) : file.path;
@@ -228,35 +239,25 @@ const Editor: React.FC = () => {
         }, {} as any);
         await wcInstance.mount(filesForWC);
         onData('[INFO] Files mounted.\n');
-        console.log('[WebContainer] Files mounted.');
 
         setStartupStatus('installing');
-        onData('\n>>> Running `npm install` (this may take a minute)...\n');
-        console.log('[WebContainer] Running npm install...');
+        onData('\n>>> Running `npm install`...\n');
         const installProcess = await wcInstance.spawn('npm', ['install']);
         const installExitCode = await streamToLog(installProcess, onData);
         if (installExitCode !== 0) {
           throw new Error(`npm install failed with exit code ${installExitCode}.`);
         }
         onData('[INFO] Dependencies installed.\n');
-        console.log('[WebContainer] Dependencies installed.');
 
         setStartupStatus('starting');
         onData('\n>>> Starting dev server with `npm run dev`...\n');
-        console.log('[WebContainer] Starting dev server...');
         const startProcess = await wcInstance.spawn('npm', ['run', 'dev']);
         streamToLog(startProcess, onData);
 
       } catch (err: any) {
         if (isTornDown) return;
-        console.error("WebContainer setup failed:", err);
         setStartupStatus('error');
         onData(`\n[ERROR] An error occurred during setup: ${err.message}\n`);
-        if (err.message.includes('timeout')) {
-          onData('Troubleshooting: Please try refreshing the page. Ensure you are on a stable internet connection and using a compatible browser (Chrome or Edge).\n');
-        } else if (!window.crossOriginIsolated) {
-            onData('Troubleshooting: Critical environment requirement missing. This may be due to a configuration issue. COOP/COEP headers are required.\n');
-        }
       }
     };
     
@@ -266,7 +267,6 @@ const Editor: React.FC = () => {
       isTornDown = true;
       if (bootTimeoutId) clearTimeout(bootTimeoutId);
       if (wcInstance) {
-        console.log('[WebContainer] Tearing down instance.');
         wcInstance.teardown();
       }
       setWebcontainerInstance(null);
@@ -281,16 +281,14 @@ const Editor: React.FC = () => {
     loadInitialData();
   }, [loadInitialData]);
   
-  // --- Autosave Effect ---
   useEffect(() => {
-    if (loading || saveStatus === 'saving') return;
+    if (loading || saveStatus === 'saving' || !editorSettings.autoSave) return;
     const timeout = setTimeout(() => {
       forceSave(false);
     }, 2000);
     return () => clearTimeout(timeout);
-  }, [project, loading]);
+  }, [project, loading, editorSettings.autoSave]);
 
-  // --- Debounced File Update for WebContainer ---
   const writeFilesToContainer = useCallback(debounce(async (filesToWrite: Record<string, string>) => {
     if (!webcontainerInstance) return;
     setStartupLog(prev => prev + '\n>>> Applying file changes...\n');
@@ -299,14 +297,12 @@ const Editor: React.FC = () => {
         try {
             await webcontainerInstance.fs.writeFile(wcPath, content);
         } catch (e: any) {
-            console.error(`Failed to write file ${path}:`, e);
             setStartupLog(prev => prev + `\n[ERROR] Error writing ${path}: ${e.message}\n`);
         }
     }
     setStartupLog(prev => prev + '[INFO] Changes applied.\n');
   }, 1000), [webcontainerInstance]);
 
-  // --- Live File Update Effect ---
   useEffect(() => {
       if (startupStatus === 'running' && project && previousFilesRef.current) {
           const changedFiles: Record<string, string> = {};
@@ -447,7 +443,7 @@ const Editor: React.FC = () => {
             newOpenFiles = newOpenFiles.filter(op => op !== key);
           }
         });
-      } else { // 'create' or 'update'
+      } else {
         const fileExisted = initialFilePaths.has(path);
         const effectiveAction = fileExisted ? 'update' : 'create';
         changedFileActions.push({ action: effectiveAction, path });
@@ -516,7 +512,6 @@ const Editor: React.FC = () => {
     const initialFilePaths = new Set(Object.keys(project.files));
 
     try {
-      // --- Client-side Analysis Simulation ---
       const filesToAnalyze = Object.keys(project.files).filter(p => project.files[p].name !== '.keep');
       for (const filePath of filesToAnalyze) {
           if (signal.aborted) throw new Error("Cancelled by user.");
@@ -530,10 +525,9 @@ const Editor: React.FC = () => {
           await new Promise(resolve => setTimeout(resolve, 150));
       }
       
-      // --- Transition to Thinking State ---
       const thinkingUpdate: Partial<ChatMessage> = {
           isLoading: true,
-          analysisText: undefined, // Clear analysis text
+          analysisText: undefined,
           content: '',
       };
       updateMessageInState(aiMsg.session_id, { ...aiMsg, ...thinkingUpdate });
@@ -563,14 +557,13 @@ const Editor: React.FC = () => {
             return { action, path };
         });
 
-        // Temporarily remove completed blocks to find the live one
         let textForLiveParsing = fullText;
         completedBlocks.forEach(match => {
             textForLiveParsing = textForLiveParsing.replace(match[0], '');
         });
 
         let currentLiveStreamData: ChatMessage['liveStream'] | undefined = undefined;
-        let contentForMarkdown = textForLiveParsing; // This now only contains summary + live block + json block
+        let contentForMarkdown = textForLiveParsing;
 
         const lastOpeningFenceMatch = [...textForLiveParsing.matchAll(/```(\w*)\s*\n/g)].pop();
         if (lastOpeningFenceMatch) {
@@ -582,20 +575,17 @@ const Editor: React.FC = () => {
                 const codeContent = contentAfterLastOpen.substring(lastOpeningFenceMatch[0].length);
                 const pathMatch = codeContent.match(/^(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)/);
                 
-                // Ensure it's a file block and not the final json block
                 if (pathMatch && language.toLowerCase() !== 'json') {
                     currentLiveStreamData = {
                         currentFile: pathMatch[1],
                         language: language,
                         currentCode: codeContent.replace(/^(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)\s*(\*\/)?\n?/, ''),
                     };
-                    // FIX: Remove the live block from markdown content to prevent duplication
                     contentForMarkdown = textForLiveParsing.substring(0, lastOpeningFenceIndex).trim();
                 }
             }
         }
 
-        // Now, also remove the final JSON block from the markdown content
         const finalJsonBlockRegex = /```json\s*[\s\S]*?```\s*$/;
         contentForMarkdown = contentForMarkdown.replace(finalJsonBlockRegex, '').trim();
 
@@ -622,7 +612,6 @@ const Editor: React.FC = () => {
       
       if (jsonMatch && jsonMatch[1]) {
         try {
-          // Sanitize the JSON string before parsing to remove trailing commas etc.
           const sanitizedJson = jsonMatch[1].trim().replace(/,(?=\s*?[\}\]])/g, '');
           const response = JSON.parse(sanitizedJson);
           if (response.files && Array.isArray(response.files) && response.files.length > 0) {
@@ -732,10 +721,11 @@ const Editor: React.FC = () => {
     }
   };
 
-  const handleCreateCheckpoint = async (name: string) => {
+  const handleCreateCheckpoint = async (name: string, filesOverride?: Record<string, ProjectFile>) => {
     if (project && projectId) {
       try {
-        const newCheckpoint = await projectService.createCheckpoint(projectId, name, project.files);
+        const filesToSave = filesOverride || project.files;
+        const newCheckpoint = await projectService.createCheckpoint(projectId, name, filesToSave);
         setCheckpoints(prev => [newCheckpoint, ...prev]);
         const systemMsg: ChatMessage = {
           clientId: Date.now().toString(),
@@ -915,7 +905,6 @@ const Editor: React.FC = () => {
     }
   };
 
-  // --- Draggable & Resizable Modal Logic ---
   const handleMove = useCallback((e: MouseEvent | TouchEvent) => {
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
@@ -1052,10 +1041,10 @@ const Editor: React.FC = () => {
   }, [handleTerminalResizeMove, handleTerminalResizeEnd]);
 
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-background text-white"><Loader2 className="animate-spin w-7 h-7 md:w-8 md:h-8"/></div>;
+  if (loading) return <div className="h-[100dvh] flex items-center justify-center bg-background text-white"><Loader2 className="animate-spin w-7 h-7 md:w-8 md:h-8"/></div>;
 
   if (loadError) return (
-    <div className="h-screen flex flex-col items-center justify-center bg-background text-red-400 p-4 md:p-6">
+    <div className="h-[100dvh] flex flex-col items-center justify-center bg-background text-red-400 p-4 md:p-6">
       <AlertTriangle className="w-10 h-10 md:w-12 md:h-12 mb-3 md:mb-4"/>
       <h2 className="text-xl md:text-2xl font-bold text-white">Failed to Load Project</h2>
       <p className="text-sm md:text-base text-gray-400 mt-2 text-center">{loadError}</p>
@@ -1067,7 +1056,9 @@ const Editor: React.FC = () => {
   
   if (!project) return null;
   
-  const isRunnableProject = project.type === 'react-vite' || project.type === 'nextjs';
+  // Terminal is available for React, Next.js, Python, and PHP projects
+  const isRunnableProject = ['react-vite', 'nextjs', 'python', 'php'].includes(project.type || '');
+  const errorLogs = consoleLogs.filter(l => l.level === 'error');
 
   return (
     <>
@@ -1128,11 +1119,13 @@ const Editor: React.FC = () => {
             onDeleteSession={handleDeleteSession}
             onDragStart={handleDragStart}
             onResizeStart={handleResizeStart}
+            errorLogs={errorLogs}
           />
         </div>
       )}
 
-      <div className="h-screen flex flex-col bg-background text-gray-300 overflow-hidden transition-colors duration-300">
+      {/* Main Container: 100dvh for better mobile height */}
+      <div className="h-[100dvh] flex flex-col bg-background text-gray-300 overflow-hidden transition-colors duration-300">
         <header className="h-9 md:h-10 bg-[#1e1e1e] border-b border-[#2b2b2b] flex items-center justify-between px-2 md:px-3 z-30 shrink-0 select-none">
           <div className="flex items-center gap-2 md:gap-3">
             {isMobile && (
@@ -1159,7 +1152,10 @@ const Editor: React.FC = () => {
             {isMobile ? (
               <>
               <button onClick={() => { setMobileTab('preview'); setRefreshTrigger(p => p + 1); }} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${mobileTab === 'preview' ? 'text-accent' : 'text-gray-400'}`} title="Preview"><Play className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
-              <button onClick={() => setIsChatModalOpen(true)} className={`p-1.5 rounded hover:bg-white/10 transition-colors text-gray-400`} title="AI Assistant"><Sparkles className="w-3.5 h-3.5 md:w-4 md:h-4" /></button>
+              <button onClick={() => setIsChatModalOpen(true)} className={`p-1.5 rounded hover:bg-white/10 transition-colors text-gray-400 relative`} title="AI Assistant">
+                <Sparkles className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                 {errorLogs.length > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>}
+              </button>
               </>
             ) : (
                 <>
@@ -1180,7 +1176,7 @@ const Editor: React.FC = () => {
           </div>
         </header>
 
-        <main className="flex-1 flex flex-col overflow-hidden">
+        <main className="flex-1 flex flex-col overflow-hidden relative">
             <div className="flex-1 flex overflow-hidden relative">
               {actionError && (
                  <div className="absolute top-3 right-3 z-[101] p-3 md:p-4 max-w-xs md:max-w-sm bg-red-500/20 border border-red-500/30 rounded-lg flex items-start gap-2 md:gap-3 text-red-300 text-xs md:text-sm animate-fade-in shadow-2xl">
@@ -1195,22 +1191,47 @@ const Editor: React.FC = () => {
                   <div className={`w-10 md:w-12 bg-[#252526] border-r border-[#2b2b2b] flex-col items-center py-2 shrink-0 z-30 ${isMobile ? 'hidden' : 'flex'}`}>
                     <button onClick={() => toggleSidebar('files')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'files' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Explorer"><Files className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'files' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
                     <button onClick={() => toggleSidebar('search')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'search' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Search"><Search className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'search' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
-                    <button onClick={() => setIsChatModalOpen(true)} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative text-gray-500 hover:text-gray-300`} title="AI Assistant"><Sparkles className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" /></button>
+                    <button onClick={() => toggleSidebar('git')} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative ${sidebarView === 'git' && isSidebarOpen ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Source Control"><GitBranch className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />{sidebarView === 'git' && isSidebarOpen && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent"></div>}</button>
+                    <button onClick={() => setIsChatModalOpen(true)} className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center relative text-gray-500 hover:text-gray-300`} title="AI Assistant">
+                        <Sparkles className="w-5 h-5 md:w-6 md:h-6 stroke-[1.5]" />
+                        {errorLogs.length > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>}
+                    </button>
                   </div>
                   <div className={`transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-56 md:w-64 lg:w-72' : 'w-0'} overflow-hidden`}>
                       <div className="w-56 md:w-64 lg:w-72 h-full bg-sidebar border-r border-border flex flex-col shrink-0">
                           {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={handleFileSelect} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />}
                           {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-7 h-7 md:w-8 md:h-8 mx-auto mb-2 opacity-50" />Global search coming soon</div>}
+                          {sidebarView === 'git' && <GitPanel project={project} checkpoints={checkpoints} onCreateCheckpoint={async (msg, files) => { await handleCreateCheckpoint(msg, files); }} onRefresh={() => setRefreshTrigger(p => p + 1)} />}
                       </div>
                   </div>
               </div>
               
               {isMobile && isSidebarOpen && (
-                <div className="absolute top-0 left-0 h-full w-4/5 max-w-[280px] z-40 bg-sidebar border-r border-border flex flex-col animate-in slide-in-from-left-full duration-300">
-                  <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={path => { handleFileSelect(path); setIsSidebarOpen(false); }} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />
+                <div className="absolute top-0 left-0 h-full w-4/5 max-w-[280px] z-40 bg-sidebar border-r border-border flex flex-col animate-in slide-in-from-left-full duration-300 shadow-2xl">
+                   {/* Mobile Sidebar Tabs */}
+                   <div className="flex border-b border-border bg-[#252526]">
+                      <button 
+                        onClick={() => setSidebarView('files')} 
+                        className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-colors ${sidebarView === 'files' ? 'border-accent text-white bg-active/50' : 'border-transparent text-gray-400'}`}
+                      >
+                        <Files className="w-4 h-4" /> Files
+                      </button>
+                      <button 
+                        onClick={() => setSidebarView('git')} 
+                        className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-colors ${sidebarView === 'git' ? 'border-accent text-white bg-active/50' : 'border-transparent text-gray-400'}`}
+                      >
+                        <GitBranch className="w-4 h-4" /> Git
+                      </button>
+                   </div>
+
+                  {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={path => { handleFileSelect(path); setIsSidebarOpen(false); }} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />}
+                  {sidebarView === 'git' && <GitPanel project={project} checkpoints={checkpoints} onCreateCheckpoint={async (msg, files) => { await handleCreateCheckpoint(msg, files); setIsSidebarOpen(false); }} onRefresh={() => setRefreshTrigger(p => p + 1)} />}
+                  
+                   {/* Fallback for Search if selected somehow */}
+                   {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-7 h-7 md:w-8 md:h-8 mx-auto mb-2 opacity-50" />Search coming soon</div>}
                 </div>
               )}
-              {isMobile && isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="absolute inset-0 bg-black/50 z-30 animate-in fade-in duration-300"></div>}
+              {isMobile && isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="absolute inset-0 bg-black/50 z-30 animate-in fade-in duration-300 backdrop-blur-sm"></div>}
               
               <div className={`bg-background h-full flex flex-col min-w-0 ${isMobile ? (mobileTab === 'editor' ? 'flex flex-1 w-full' : 'hidden') : 'flex-1 relative'}`}>
                 <CodeEditor 
@@ -1220,6 +1241,7 @@ const Editor: React.FC = () => {
                   onChange={handleFileChange} 
                   onCloseFile={handleCloseFile} 
                   onSelectFile={handleFileSelect} 
+                  onSave={() => forceSave(true)}
                   isMobile={isMobile}
                   isRunnableProject={isRunnableProject}
                   onToggleTerminal={() => setIsTerminalOpen(p => !p)}
@@ -1238,6 +1260,8 @@ const Editor: React.FC = () => {
                     startupStatus={startupStatus}
                     startupLog={startupLog}
                     serverUrl={serverUrl}
+                    logs={consoleLogs}
+                    onClearLogs={() => setConsoleLogs([])}
                   />
                 </div>
               )}
@@ -1254,6 +1278,8 @@ const Editor: React.FC = () => {
                             webcontainerInstance={webcontainerInstance}
                             isContainerReady={startupStatus !== 'booting' && startupStatus !== 'idle'}
                             onClose={() => setIsTerminalOpen(false)}
+                            projectType={project.type}
+                            files={project.files}
                         />
                     </div>
                 </>

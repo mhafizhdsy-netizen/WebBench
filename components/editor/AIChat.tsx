@@ -1,9 +1,10 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { File, ChatMessage, ChatSession, FileAction } from '../../types';
+import { File, ChatMessage, ChatSession, FileAction, LogEntry } from '../../types';
 import { Button } from '../ui/Button';
 import { generateSuggestions } from '../../services/geminiService';
-import { Send, Sparkles, X, Bot, User as UserIcon, ArrowDown, Loader2, Lightbulb, RefreshCw, ChevronRight, Paperclip, FileText, Cpu, CheckCircle2, LinkIcon, History, Plus, ChevronDown, Square, Trash2, MoreVertical, AlertTriangle, Edit, XCircle } from 'lucide-react';
+import { Send, Sparkles, X, Bot, User as UserIcon, ArrowDown, Loader2, Lightbulb, RefreshCw, ChevronRight, Paperclip, FileText, Cpu, CheckCircle2, LinkIcon, History, Plus, ChevronDown, Square, Trash2, MoreVertical, AlertTriangle, Edit, XCircle, Search, ClipboardList, Zap, Microscope, Wrench } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -113,6 +114,37 @@ const MODEL_CONFIG: Record<ModelName, { name: string; description: string; icon:
     'gemini-3-pro-preview': { name: 'Advanced', description: 'Slower, but best for complex requests.', icon: Cpu }
 };
 
+// Process Indicator Component
+const ProcessIndicator = ({ content }: { content: string }) => {
+  const lowerContent = content.toLowerCase();
+  
+  // Explicit Phase Detection based on new System Instructions
+  let step = 1;
+  if (lowerContent.includes('phase 2') || lowerContent.includes('research')) step = 2;
+  if (lowerContent.includes('phase 3') || lowerContent.includes('analy')) step = 3;
+  if (lowerContent.includes('phase 4') || lowerContent.includes('execut') || lowerContent.includes('```')) step = 4;
+
+  const steps = [
+    { label: 'Plan', icon: ClipboardList, active: step >= 1 },
+    { label: 'Research', icon: Search, active: step >= 2 },
+    { label: 'Analyze', icon: Microscope, active: step >= 3 },
+    { label: 'Execute', icon: Zap, active: step >= 4 },
+  ];
+
+  return (
+    <div className="flex items-center gap-2 mb-3 px-1 overflow-x-auto no-scrollbar">
+      {steps.map((s, i) => (
+        <div key={i} className={`flex items-center gap-1.5 px-2 py-1 rounded-full border text-[10px] uppercase font-bold tracking-wider transition-all duration-300 ${s.active ? 'bg-accent/20 border-accent/50 text-accent' : 'bg-[#2d2d2d] border-[#3e3e3e] text-gray-500 opacity-50'}`}>
+          <s.icon className="w-3 h-3" />
+          <span>{s.label}</span>
+          {s.active && step === i + 1 && <span className="animate-pulse w-1.5 h-1.5 rounded-full bg-accent ml-1"></span>}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+
 interface ChatMessageItemProps {
   message: ChatMessage;
   onContextMenu: (e: React.MouseEvent, message: ChatMessage) => void;
@@ -178,6 +210,8 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({ message: msg, onCont
             </div>
           ) : (
             <div className="markdown-content">
+              {msg.role === 'assistant' && msg.isLoading && <ProcessIndicator content={msg.content || ''} />}
+              
               {msg.attachments && msg.attachments.length > 0 && (
                 <div className="mb-2 grid grid-cols-3 gap-2">
                   {msg.attachments.map((att, index) => (
@@ -280,7 +314,6 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({ message: msg, onCont
     </div>
   );
 }, (prevProps, nextProps) => {
-    // Custom comparison function for React.memo to prevent unnecessary re-renders
     const prev = prevProps.message;
     const next = nextProps.message;
     return (
@@ -314,12 +347,13 @@ interface AIChatProps {
   onDeleteSession: (sessionId: string) => void;
   onDragStart: (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => void;
   onResizeStart: (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>, handle: string) => void;
+  errorLogs?: LogEntry[];
 }
 
 export const AIChat: React.FC<AIChatProps> = ({ 
   files, sessions, activeSessionId, onSendMessage, onRegenerate, onClose, 
   onOpenCheckpoints, onCreateCheckpoint, onCreateSession, onSwitchSession, onCancel,
-  onDeleteMessage, onDeleteSession, onDragStart, onResizeStart
+  onDeleteMessage, onDeleteSession, onDragStart, onResizeStart, errorLogs = []
 }) => {
   const [input, setInput] = useState('');
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -412,8 +446,6 @@ export const AIChat: React.FC<AIChatProps> = ({
   };
   
   useEffect(() => {
-    // Scroll to bottom when the chat becomes visible or the session changes.
-    // A small timeout ensures the DOM has rendered and scrollHeight is accurate.
     setTimeout(() => {
       scrollToBottom();
     }, 50);
@@ -477,6 +509,18 @@ export const AIChat: React.FC<AIChatProps> = ({
   const handleRegenerate = async () => {
     if (isLoading || !activeSessionId) return;
     await onRegenerate(activeSessionId);
+  };
+
+  const handleAutoFix = () => {
+    if (!errorLogs || errorLogs.length === 0) return;
+    
+    const errorsText = errorLogs.map(err => {
+        const msg = err.message.map(m => typeof m === 'object' ? JSON.stringify(m) : String(m)).join(' ');
+        return `[${err.level.toUpperCase()}] ${msg}`;
+    }).join('\n');
+
+    const prompt = `I found the following errors in the browser console. Please analyze them and fix the code to resolve these issues:\n\n${errorsText}`;
+    handleSend(prompt);
   };
   
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -601,6 +645,16 @@ export const AIChat: React.FC<AIChatProps> = ({
             <div className="h-4"></div>
           </div>
           <div className="bg-sidebar p-1 md:p-2 border-t border-border shadow-2xl relative shrink-0">
+            {/* Auto Fix Button */}
+            {errorLogs.length > 0 && (
+                <div className="absolute bottom-full right-4 mb-2 animate-in slide-in-from-bottom-2 fade-in">
+                    <Button onClick={handleAutoFix} className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-2 shadow-lg backdrop-blur-md">
+                        <Wrench className="w-4 h-4" />
+                        Auto Fix ({errorLogs.length} Errors)
+                    </Button>
+                </div>
+            )}
+            
             {isIdeasOverlayOpen && (
               <div ref={ideasOverlayRef} className="absolute bottom-full left-0 right-0 p-1 md:p-2 bg-gradient-to-t from-sidebar to-sidebar/80 backdrop-blur-sm animate-in fade-in slide-in-from-bottom-4 duration-300">
                 <div className="flex items-center justify-between mb-2 px-1">
@@ -681,7 +735,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                                               setSelectedModel(modelKey);
                                               setIsModelDropdownOpen(false);
                                           }}
-                                          className={`w-full text-left px-3 py-2 flex items-start gap-2 md:gap-3 transition-colors ${isSelected ? 'bg-accent/20' : 'hover:bg-active'}`}
+                                          className={`w-full text-left px-3 py-2 flex items-start gap-2 md:gap-3 transition-colors ${isSelected ? 'bg-active/20' : 'hover:bg-active'}`}
                                       >
                                         <div className="w-3.5 h-3.5 md:w-4 md:h-4 shrink-0 mt-0.5 flex items-center justify-center">
                                           {isSelected && <CheckCircle2 className="w-3.5 h-3.5 md:w-4 md:h-4 text-accent" />}
