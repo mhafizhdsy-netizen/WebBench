@@ -259,8 +259,12 @@ export const projectService = {
 
       if (error) throw error;
 
-      // Increment view count
-      await supabase.rpc('increment_view_count', { project_id: id }).catch(() => {}); 
+      // Increment view count safely
+      try {
+        await supabase.rpc('increment_view_count', { project_id: id });
+      } catch (e) {
+        console.warn("Failed to increment view count", e);
+      }
 
       return {
         id: data.id,

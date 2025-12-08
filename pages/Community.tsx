@@ -5,8 +5,9 @@ import { projectService } from '../services/projectService';
 import { PublishedProject } from '../types';
 import { SEO } from '../components/ui/SEO';
 import { WebBenchLoader } from '../components/ui/Loader';
-import { Search, Globe, Eye, Heart, ArrowLeft, User } from 'lucide-react';
+import { Search, Globe, ArrowLeft } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import { CommunityProjectCard } from '../components/dashboard/CommunityProjectCard';
 
 // Reusing logo for consistency
 const WebBenchLogo = ({ className = "w-8 h-8" }) => (
@@ -100,47 +101,11 @@ const Community: React.FC = () => {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredProjects.map(project => (
-                        <div 
+                        <CommunityProjectCard
                            key={project.id} 
+                           project={project}
                            onClick={() => navigate(`/community/${project.id}`)}
-                           className="bg-sidebar border border-border rounded-xl overflow-hidden hover:border-accent/50 hover:shadow-2xl transition-all cursor-pointer group flex flex-col h-full"
-                        >
-                            {/* Project Thumbnail / Preview (Abstract) */}
-                            <div className="h-40 bg-[#1e1e1e] relative overflow-hidden group-hover:scale-[1.02] transition-transform duration-500">
-                                <div className="absolute inset-0 flex items-center justify-center opacity-30">
-                                    <Globe className="w-20 h-20 text-gray-700" />
-                                </div>
-                                <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-sidebar to-transparent">
-                                    <div className="flex gap-2">
-                                        {project.tags.slice(0, 3).map(tag => (
-                                            <span key={tag} className="text-[10px] bg-accent/20 text-accent px-2 py-0.5 rounded-full border border-accent/30 backdrop-blur-sm">
-                                                {tag}
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div className="p-5 flex flex-col flex-1">
-                                <h3 className="text-lg font-bold text-white mb-1 truncate group-hover:text-accent transition-colors">{project.title}</h3>
-                                <p className="text-sm text-gray-400 line-clamp-2 mb-4 flex-1">{project.description || "No description provided."}</p>
-                                
-                                <div className="flex items-center justify-between pt-4 border-t border-border mt-auto">
-                                    <div className="flex items-center gap-2">
-                                        {project.author.avatar_url ? (
-                                            <img src={project.author.avatar_url} alt={project.author.name} className="w-6 h-6 rounded-full bg-gray-700 object-cover" />
-                                        ) : (
-                                            <div className="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center"><User className="w-3 h-3 text-gray-400" /></div>
-                                        )}
-                                        <span className="text-xs text-gray-300 font-medium truncate max-w-[100px]">{project.author.name}</span>
-                                    </div>
-                                    <div className="flex items-center gap-3 text-xs text-gray-500">
-                                        <div className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" /> {project.views_count}</div>
-                                        <div className="flex items-center gap-1"><Heart className="w-3.5 h-3.5" /> {project.likes_count}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        />
                     ))}
                 </div>
             )}
