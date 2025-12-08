@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useRef } from 'react';
+
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { projectService } from '../services/projectService';
-import { Project, File } from '../types';
+import { Project, File, PublishedProject } from '../types';
 import { Button } from '../components/ui/Button';
 import { WebBenchLoader } from '../components/ui/Loader';
 import { SEO } from '../components/ui/SEO';
@@ -9,7 +10,7 @@ import {
   Download, Edit, ArrowLeft, Clock, FileCode2, 
   AlertTriangle, Twitter, Linkedin, Copy, Check, 
   Layers, Code2, Globe, Terminal, Share2, FileText,
-  Hash, Database, Calendar, Eye
+  Hash, Database, Calendar, Eye, User, Heart, MessageSquare
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { supabase } from '../services/supabaseClient';
@@ -35,7 +36,6 @@ const AtomIcon = ({ className }: { className?: string }) => (
 const TechBadge: React.FC<{ type: string }> = ({ type }) => {
     let icon = <FileText className="w-3 h-3" />;
     let label = type.toUpperCase();
-    // Warna sesuai tema VS Code (File Icon Theme colors)
     let colorClass = "bg-[#2d2d30] text-gray-400 border-gray-700"; 
 
     if (type === 'react-vite' || type === 'tsx' || type === 'jsx') {
@@ -72,12 +72,16 @@ const TechBadge: React.FC<{ type: string }> = ({ type }) => {
     );
 };
 
-// --- Main SharePage Component ---
+interface SharePageProps {
+    isPublished?: boolean;
+}
 
-const SharePage: React.FC = () => {
+const SharePage: React.FC<SharePageProps> = ({ isPublished = false }) => {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const [project, setProject] = useState<Project | null>(null);
+    
+    // Union type for the project data we render
+    const [project, setProject] = useState<Project | PublishedProject | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -93,18 +97,26 @@ const SharePage: React.FC = () => {
             }
 
             try {
-                // Check session
                 const { data: { session } } = await supabase.auth.getSession();
                 setIsLoggedIn(!!session);
 
-                if (session) {
-                    const data = await projectService.getProject(projectId);
+                if (isPublished) {
+                    // Fetch from public table
+                    const data = await projectService.getPublishedProject(projectId);
+                    if (!data) throw new Error("Published project not found.");
                     setProject(data);
+                } else {
+                    // Fetch from private table (requires auth + permission)
+                    if (session) {
+                        const data = await projectService.getProject(projectId);
+                        setProject(data);
+                    }
                 }
             } catch (err: any) {
-                // Only show error if logged in, otherwise show restricted access screen
-                if (await supabase.auth.getUser().then(r => r.data.user)) {
-                   setError(err.message || "Failed to load project details.");
+                if (isPublished) {
+                     setError(err.message || "Failed to load community project.");
+                } else if (await supabase.auth.getUser().then(r => r.data.user)) {
+                     setError(err.message || "Failed to load project details.");
                 }
             } finally {
                 setLoading(false);
@@ -112,16 +124,12 @@ const SharePage: React.FC = () => {
         };
 
         checkAuthAndFetch();
-    }, [projectId]);
+    }, [projectId, isPublished]);
 
-    // Build Preview Effect
     useEffect(() => {
         if (!project) return;
         
-        let cleanup = () => {};
-
         const buildPreview = () => {
-             // 1. Find Entry Point (index.html)
             const htmlFile = (Object.values(project.files) as File[]).find(f => f.name.endsWith('.html'));
             
             if (!htmlFile) {
@@ -129,7 +137,6 @@ const SharePage: React.FC = () => {
                 return () => {};
             }
 
-            // 2. Process Content
             let content = htmlFile.content;
             const blobUrls: string[] = [];
 
@@ -144,7 +151,6 @@ const SharePage: React.FC = () => {
                 return stack.join('/') || '/';
             }
 
-            // Replace CSS
             content = content.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/g, (match, href) => {
                 if (href.startsWith('http') || href.startsWith('//')) return match;
                 const absPath = href.startsWith('/') ? href : resolvePath(htmlFile.path, href);
@@ -158,7 +164,6 @@ const SharePage: React.FC = () => {
                 return match;
             });
 
-            // Replace JS
             content = content.replace(/<script[^>]+src=["']([^"']+)["'][^>]*>/g, (match, src) => {
                 if (src.startsWith('http') || src.startsWith('//')) return match;
                 const absPath = src.startsWith('/') ? src : resolvePath(htmlFile.path, src);
@@ -172,8 +177,7 @@ const SharePage: React.FC = () => {
                 return match;
             });
             
-            // Replace Images
-            content = content.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/g, (match, src) => {
+             content = content.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/g, (match, src) => {
                 if (src.startsWith('http') || src.startsWith('//') || src.startsWith('data:')) return match;
                  const absPath = src.startsWith('/') ? src : resolvePath(htmlFile.path, src);
                  const file = project.files[absPath];
@@ -184,7 +188,6 @@ const SharePage: React.FC = () => {
                  return match;
             });
             
-            // Basic interceptor to prevent link navigation
              const interceptorScript = `
                 <script>
                     document.addEventListener('click', (e) => {
@@ -218,7 +221,7 @@ const SharePage: React.FC = () => {
             };
         };
 
-        cleanup = buildPreview();
+        const cleanup = buildPreview();
         return cleanup;
 
     }, [project]);
@@ -240,12 +243,25 @@ const SharePage: React.FC = () => {
         const url = window.URL.createObjectURL(content);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${project.name}.zip`;
+        const projectName = 'title' in project ? project.title : project.name;
+        a.download = `${projectName}.zip`;
         a.click();
         window.URL.revokeObjectURL(url);
     };
 
-    // --- Loading State ---
+    const handleFork = async () => {
+        if (!project) return;
+        try {
+            const projectName = 'title' in project ? project.title : project.name;
+            const type = project.type || 'starter';
+            const newProject = await projectService.createProject(`${projectName} (Fork)`, type);
+            await projectService.updateProject(newProject.id, { files: project.files });
+            navigate(`/editor/${newProject.id}`);
+        } catch (e: any) {
+            alert("Failed to fork project: " + e.message);
+        }
+    };
+
     if (loading) {
         return (
             <div className="h-screen w-full bg-[#1e1e1e] flex items-center justify-center">
@@ -254,8 +270,7 @@ const SharePage: React.FC = () => {
         );
     }
 
-    // --- Restricted Access State ---
-    if (!isLoggedIn) {
+    if (!isLoggedIn && !isPublished) {
         return (
             <>
                 <SEO title="Project Access" description="Login to view this WebBench project."/>
@@ -281,7 +296,6 @@ const SharePage: React.FC = () => {
         )
     }
 
-    // --- Error State ---
     if (error || !project) {
         return (
            <div className="min-h-screen w-full bg-[#1e1e1e] flex flex-col items-center justify-center p-4 text-center">
@@ -297,10 +311,8 @@ const SharePage: React.FC = () => {
        );
    }
 
-    // --- Data Preparation ---
     const projectFiles = (Object.values(project.files) as File[]).filter((f) => f.name !== '.keep');
     
-    // Detect Tech Stack
     const techStack = new Set<string>();
     if (project.type) techStack.add(project.type);
     projectFiles.forEach(f => {
@@ -310,25 +322,23 @@ const SharePage: React.FC = () => {
     const techStackArray = Array.from(techStack).slice(0, 5);
 
     const shareUrl = window.location.href;
-    const shareText = `Check out "${project.name}" on WebBench!`;
+    const displayName = 'title' in project ? project.title : project.name;
+    const description = 'description' in project ? project.description : '';
+    // Author Logic - Updated to use profile data
+    const authorName = 'author' in project ? project.author.name : 'Private User';
+    const authorAvatar = 'author' in project ? project.author.avatar_url : '';
+    const creationDate = 'created_at' in project ? project.created_at : project.createdAt;
+    
+    const shareText = `Check out "${displayName}" on WebBench!`;
     const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`;
-    const linkedinUrl = `https://www.linkedin.com/shareArticle?mini=true&url=${encodeURIComponent(shareUrl)}&title=${encodeURIComponent(project.name)}`;
+    const linkedinUrl = `https://www.linkedin.com/shareArticle?mini=true&url=${encodeURIComponent(shareUrl)}&title=${encodeURIComponent(displayName)}`;
 
     return (
         <>
-            <SEO title={`${project.name} | Overview`} description={`View details for ${project.name}.`} />
+            <SEO title={`${displayName} | ${isPublished ? 'Community' : 'Project'}`} description={`View details for ${displayName}.`} />
             
-            {/* 
-                Main Container Fix:
-                - h-[100dvh]: Forces fixed viewport height (Dynamic Viewport Height for mobile).
-                - w-full: Full width.
-                - overflow-y-auto: Enables internal scrolling on this container.
-                - no-scrollbar: Hides the visual scrollbar but keeps functionality.
-                - bg-[#1e1e1e]: Ensures background covers the whole "scrollable" area.
-            */}
             <div className="h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] font-sans overflow-y-auto no-scrollbar selection:bg-accent/30 selection:text-white">
                 
-                {/* Navbar - Sticky ensures it stays at top of the scroll container */}
                 <header className="sticky top-0 z-50 w-full bg-[#1e1e1e]/80 backdrop-blur-md border-b border-[#3e3e42]">
                     <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
                         <Link to="/dashboard" className="flex items-center gap-2 group">
@@ -336,33 +346,50 @@ const SharePage: React.FC = () => {
                             <span className="font-bold text-white tracking-tight">WebBench</span>
                         </Link>
                         <div className="flex items-center gap-3">
-                            <Link to="/dashboard" className="text-sm font-medium text-gray-400 hover:text-white transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded hover:bg-[#2d2d30]">
-                                <ArrowLeft className="w-4 h-4" /> Back
-                            </Link>
-                            <Button onClick={() => navigate(`/editor/${project.id}`)} size="sm">
-                                <Edit className="w-3.5 h-3.5 mr-2" /> Open Editor
+                            <Button variant="secondary" onClick={() => navigate('/dashboard')}>
+                                <ArrowLeft className="w-4 h-4 mr-2" /> Back
                             </Button>
+                            {!isPublished && (
+                                <Button onClick={() => navigate(`/editor/${project.id}`)} size="sm">
+                                    <Edit className="w-3.5 h-3.5 mr-2" /> Open Editor
+                                </Button>
+                            )}
+                             {isPublished && (
+                                <Button onClick={handleFork} size="sm">
+                                    <Copy className="w-3.5 h-3.5 mr-2" /> Fork Project
+                                </Button>
+                            )}
                         </div>
                     </div>
                 </header>
 
                 <main className="max-w-6xl mx-auto px-4 py-8 md:py-12 pb-20">
-                    
-                    {/* Header Section */}
                     <div className="mb-10 flex flex-col md:flex-row md:items-start md:justify-between gap-6">
                         <div>
                             <div className="flex items-center gap-2 mb-2">
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#2d2d30] text-gray-400 border border-[#3e3e42]">
-                                    Project
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${isPublished ? 'bg-accent/20 text-accent border-accent/40' : 'bg-[#2d2d30] text-gray-400 border-[#3e3e42]'}`}>
+                                    {isPublished ? 'Published' : 'Private Project'}
                                 </span>
                                 <span className="text-gray-500 text-xs flex items-center gap-1">
-                                    <Clock className="w-3 h-3" /> Last updated {new Date(project.updatedAt).toLocaleDateString()}
+                                    <Clock className="w-3 h-3" /> {isPublished ? 'Published' : 'Updated'} {new Date(creationDate).toLocaleDateString()}
                                 </span>
                             </div>
-                            <h1 className="text-3xl md:text-4xl font-bold text-white mb-3">{project.name}</h1>
-                            <p className="text-gray-400 max-w-2xl text-sm leading-relaxed">
-                                A web project built with WebBench. View statistics, technology stack, and file structure below.
-                            </p>
+                            <h1 className="text-3xl md:text-4xl font-bold text-white mb-3">{displayName}</h1>
+                            {description && <p className="text-gray-400 max-w-2xl text-sm leading-relaxed mb-3">{description}</p>}
+                            
+                            {isPublished && (
+                                <div className="flex items-center gap-2 text-sm text-gray-400">
+                                    <span>By</span>
+                                    <div className="flex items-center gap-1.5 text-white bg-[#252526] px-2 py-0.5 rounded-full border border-[#3e3e42]">
+                                        {authorAvatar ? (
+                                            <img src={authorAvatar} alt={authorName} className="w-5 h-5 rounded-full object-cover" />
+                                        ) : (
+                                            <div className="w-5 h-5 rounded-full bg-gray-700 flex items-center justify-center"><User className="w-3 h-3 text-gray-400" /></div>
+                                        )}
+                                        <span className="font-medium text-xs">{authorName}</span>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div className="flex gap-2 shrink-0">
                             <Button onClick={handleDownload} variant="secondary" size="sm" className="h-9">
@@ -374,13 +401,8 @@ const SharePage: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Content Grid */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
-                        
-                        {/* Left Column: Stats & Info */}
                         <div className="space-y-6">
-                            
-                            {/* Project DNA / Stats */}
                             <div className="bg-[#252526] border border-[#3e3e42] rounded-lg p-5 shadow-sm">
                                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
                                     <Database className="w-3.5 h-3.5" /> Project DNA
@@ -400,12 +422,20 @@ const SharePage: React.FC = () => {
                                         </div>
                                         <span className="text-white text-sm font-medium">{projectFiles.length} files</span>
                                     </div>
-                                    <div className="flex justify-between items-center py-2 border-b border-[#3e3e42]">
+                                     <div className="flex justify-between items-center py-2 border-b border-[#3e3e42]">
                                         <div className="flex items-center gap-2 text-gray-400 text-sm">
-                                            <Calendar className="w-4 h-4" /> Created
+                                            <Calendar className="w-4 h-4" /> Date
                                         </div>
-                                        <span className="text-white text-sm font-medium">{new Date(project.createdAt).toLocaleDateString()}</span>
+                                        <span className="text-white text-sm font-medium">{new Date(creationDate).toLocaleDateString()}</span>
                                     </div>
+                                    {isPublished && 'views_count' in project && (
+                                        <div className="flex justify-between items-center py-2 border-b border-[#3e3e42]">
+                                            <div className="flex items-center gap-2 text-gray-400 text-sm">
+                                                <Eye className="w-4 h-4" /> Views
+                                            </div>
+                                            <span className="text-white text-sm font-medium">{project.views_count}</span>
+                                        </div>
+                                    )}
                                 </div>
                                 
                                 <div className="mt-5">
@@ -416,10 +446,9 @@ const SharePage: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Share Widget */}
                             <div className="bg-[#252526] border border-[#3e3e42] rounded-lg p-5 shadow-sm">
                                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                    <Share2 className="w-3.5 h-3.5" /> Share Project
+                                    <Share2 className="w-3.5 h-3.5" /> Share
                                 </h3>
                                 <div className="flex gap-3">
                                     <a href={twitterUrl} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center py-2 bg-[#1e1e1e] border border-[#3e3e42] rounded hover:bg-[#007acc] hover:border-[#007acc] hover:text-white text-gray-400 transition-colors">
@@ -433,14 +462,10 @@ const SharePage: React.FC = () => {
                                     </button>
                                 </div>
                             </div>
-
                         </div>
 
-                        {/* Right Column: Code Window Preview */}
                         <div className="lg:col-span-2">
                             <div className="bg-[#1e1e1e] border border-[#3e3e42] rounded-lg shadow-2xl overflow-hidden flex flex-col h-[500px]">
-                                
-                                {/* Fake Window Titlebar */}
                                 <div className="bg-[#252526] px-4 py-2 flex items-center gap-4 border-b border-[#3e3e42] select-none">
                                     <div className="flex gap-2">
                                         <div className="w-3 h-3 rounded-full bg-[#ff5f56]"></div>
@@ -450,16 +475,13 @@ const SharePage: React.FC = () => {
                                     <div className="flex-1 text-center">
                                         <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#1e1e1e] rounded text-xs text-gray-400 font-mono border border-[#3e3e42]">
                                             <Globe className="w-3 h-3" />
-                                            {previewUrl === 'about:blank' ? 'preview.webbench.app' : 'Live Preview'}
+                                            Live Preview
                                         </div>
                                     </div>
-                                    <div className="w-10"></div> {/* Spacer for balance */}
+                                    <div className="w-10"></div>
                                 </div>
 
-                                {/* Editor Content */}
                                 <div className="flex-1 flex overflow-hidden">
-                                    
-                                    {/* Sidebar File List */}
                                     <div className="w-48 bg-[#252526] border-r border-[#3e3e42] hidden sm:flex flex-col">
                                         <div className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Explorer</div>
                                         <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
@@ -472,7 +494,6 @@ const SharePage: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    {/* Main Code Area Placeholder */}
                                     <div className="flex-1 bg-white relative">
                                         {previewUrl !== 'about:blank' ? (
                                             <iframe
@@ -490,10 +511,9 @@ const SharePage: React.FC = () => {
                                             </div>
                                         )}
                                         
-                                        {/* CTA Overlay on hover or initially if desired, but here we just show preview directly */}
                                          <div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none group-hover:pointer-events-auto">
-                                             <Button onClick={() => navigate(`/editor/${project.id}`)} size="lg" className="shadow-2xl pointer-events-auto transform translate-y-4 hover:translate-y-0 transition-transform">
-                                                Open Editor to Interact
+                                             <Button onClick={() => isPublished ? handleFork() : navigate(`/editor/${project.id}`)} size="lg" className="shadow-2xl pointer-events-auto transform translate-y-4 hover:translate-y-0 transition-transform">
+                                                {isPublished ? 'Fork to Edit' : 'Open Editor'}
                                              </Button>
                                          </div>
                                     </div>

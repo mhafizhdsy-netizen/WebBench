@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Project, File as ProjectFile, Checkpoint } from '../../types';
 import { Button } from '../ui/Button';
-import { GitBranch, Github, RefreshCw, UploadCloud, Check, Loader2, Play, Box, Download, FilePlus, FileDiff, FileMinus, User, X } from 'lucide-react';
+import { GitBranch, Github, RefreshCw, UploadCloud, Check, Loader2, Play, Box, Download, FilePlus, FileDiff, FileMinus, User, X, FileText, ArrowLeft, Save, Plus, Settings } from 'lucide-react';
 import JSZip from 'jszip';
 import { DiffEditor } from '@monaco-editor/react';
 import { useSettings } from '../../context/ThemeContext';
@@ -11,6 +11,7 @@ interface GitPanelProps {
   checkpoints: Checkpoint[];
   onCreateCheckpoint: (message: string, files?: Record<string, ProjectFile>) => Promise<void>;
   onRefresh: () => void;
+  onUpdateFiles: (files: Record<string, ProjectFile>) => Promise<void>;
 }
 
 interface DiffTarget {
@@ -20,7 +21,7 @@ interface DiffTarget {
     language: string;
 }
 
-export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCreateCheckpoint, onRefresh }) => {
+export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCreateCheckpoint, onRefresh, onUpdateFiles }) => {
   const [activeTab, setActiveTab] = useState<'source' | 'github'>('source');
   const [commitMessage, setCommitMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -37,6 +38,10 @@ export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCrea
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [isRepoInit, setIsRepoInit] = useState(checkpoints.length > 0);
   
+  // .gitignore State
+  const [isGitIgnoreEditing, setIsGitIgnoreEditing] = useState(false);
+  const [gitIgnoreContent, setGitIgnoreContent] = useState('');
+
   // Staging State
   const [stagedFiles, setStagedFiles] = useState<Set<string>>(new Set());
 
@@ -49,7 +54,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCrea
     const detectedChanges: { path: string; status: 'A' | 'M' | 'D' }[] = [];
 
     allPaths.forEach(path => {
-        // Skip .keep files if preferred, but usually they are needed for folders
         const inHead = !!headFiles[path];
         const inCurrent = !!currentFiles[path];
 
@@ -254,7 +258,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCrea
         return;
     }
     
-    // Attempt to infer owner from userData
     setPullLoading(true);
     setError(null);
     try {
@@ -263,7 +266,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCrea
         }).then(r => r.json());
         const owner = userData.login;
         
-        // Fetch archive link (zip)
         const zipResponse = await fetch(`https://api.github.com/repos/${owner}/${repoName}/zipball/main`, {
              headers: { 'Authorization': `token ${githubToken}` }
         });
@@ -278,11 +280,9 @@ export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCrea
         const newFiles: Record<string, ProjectFile> = {};
         const promises: Promise<void>[] = [];
         
-        // Unzip and flatten (GitHub adds a root folder hash we need to strip)
         zip.forEach((relativePath, zipEntry) => {
              if (!zipEntry.dir) {
                  promises.push(zipEntry.async('string').then(content => {
-                     // Strip first folder
                      const parts = relativePath.split('/');
                      if (parts.length > 1) {
                          const cleanPath = '/' + parts.slice(1).join('/');
@@ -307,7 +307,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCrea
         
         await Promise.all(promises);
         
-        // Create a merge commit checkpoint
         await onCreateCheckpoint(`Merge branch 'main' of ${repoName}`, newFiles);
         setSuccess("Repository pulled and merged successfully.");
         onRefresh();
@@ -317,6 +316,49 @@ export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCrea
     } finally {
         setPullLoading(false);
     }
+  };
+
+  const handleEditGitIgnore = () => {
+    const file = project.files['/.gitignore'];
+    setGitIgnoreContent(file ? file.content : '');
+    setIsGitIgnoreEditing(true);
+  };
+
+  const handleSaveGitIgnore = async () => {
+    setLoading(true);
+    try {
+        await onUpdateFiles({
+            '/.gitignore': {
+                path: '/.gitignore',
+                name: '.gitignore',
+                content: gitIgnoreContent,
+                type: 'plaintext',
+                lastModified: Date.now()
+            }
+        });
+        setIsGitIgnoreEditing(false);
+        setSuccess('.gitignore updated');
+        setTimeout(() => setSuccess(null), 2000);
+    } catch(e: any) {
+        setError(e.message || 'Failed to save .gitignore');
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  const appendTemplate = (type: string) => {
+      let template = '';
+      switch(type) {
+          case 'node': template = '\n# Node\nnode_modules/\ndist/\nbuild/\n.env\n.DS_Store\ncoverage/\nnpm-debug.log\n'; break;
+          case 'python': template = '\n# Python\n__pycache__/\n*.pyc\n.venv/\nvenv/\n.env\n.DS_Store\n'; break;
+          case 'php': template = '\n# PHP\n/vendor/\n.env\n.phpunit.result.cache\n'; break;
+          case 'laravel': template = '\n# Laravel\n/vendor/\n/node_modules/\n.env\n/storage/*.key\n'; break;
+          case 'general': template = '\n.DS_Store\nThumbs.db\n.vscode/\n.idea/\n'; break;
+      }
+      setGitIgnoreContent(prev => {
+          const prefix = prev && !prev.endsWith('\n') ? '\n' : '';
+          return prev + prefix + template;
+      });
   };
 
   const getStatusIcon = (status: 'A' | 'M' | 'D') => {
@@ -334,6 +376,46 @@ export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCrea
           case 'D': return 'Deleted';
       }
   };
+
+  if (isGitIgnoreEditing) {
+      return (
+        <div className="h-full flex flex-col bg-sidebar text-gray-300">
+            <div className="flex items-center justify-between p-3 border-b border-border bg-[#252526] shrink-0">
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setIsGitIgnoreEditing(false)} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors">
+                        <ArrowLeft className="w-4 h-4" />
+                    </button>
+                    <span className="font-bold text-xs uppercase tracking-wider text-gray-200">Edit .gitignore</span>
+                </div>
+                <Button onClick={handleSaveGitIgnore} size="xs" disabled={loading} className="gap-1.5">
+                    {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    Save
+                </Button>
+            </div>
+            
+            <div className="p-2 border-b border-border bg-[#1e1e1e] flex gap-2 overflow-x-auto no-scrollbar">
+                <span className="text-xs text-gray-500 py-1 px-2 whitespace-nowrap self-center">Templates:</span>
+                <button onClick={() => appendTemplate('node')} className="px-2 py-1 text-xs bg-active hover:bg-accent/20 border border-border rounded whitespace-nowrap transition-colors">Node.js</button>
+                <button onClick={() => appendTemplate('python')} className="px-2 py-1 text-xs bg-active hover:bg-accent/20 border border-border rounded whitespace-nowrap transition-colors">Python</button>
+                <button onClick={() => appendTemplate('php')} className="px-2 py-1 text-xs bg-active hover:bg-accent/20 border border-border rounded whitespace-nowrap transition-colors">PHP</button>
+                <button onClick={() => appendTemplate('laravel')} className="px-2 py-1 text-xs bg-active hover:bg-accent/20 border border-border rounded whitespace-nowrap transition-colors">Laravel</button>
+                <button onClick={() => appendTemplate('general')} className="px-2 py-1 text-xs bg-active hover:bg-accent/20 border border-border rounded whitespace-nowrap transition-colors">General</button>
+            </div>
+
+            <div className="flex-1 p-2 bg-[#1e1e1e]">
+                <textarea 
+                    value={gitIgnoreContent}
+                    onChange={(e) => setGitIgnoreContent(e.target.value)}
+                    className="w-full h-full bg-[#111] text-gray-300 p-3 font-mono text-sm border border-border rounded focus:border-accent outline-none resize-none"
+                    placeholder="# Add patterns to ignore..."
+                    spellCheck={false}
+                />
+            </div>
+        </div>
+      );
+  }
+
+  const hasGitIgnore = !!project.files['/.gitignore'];
 
   return (
     <div className="h-full flex flex-col bg-sidebar text-gray-300 relative">
@@ -407,6 +489,14 @@ export const GitPanel: React.FC<GitPanelProps> = ({ project, checkpoints, onCrea
                         </div>
                     ) : (
                         <>
+                            {/* Actions Bar */}
+                            <div className="flex items-center gap-2 mb-3">
+                                <Button onClick={handleEditGitIgnore} size="xs" variant={hasGitIgnore ? "secondary" : "primary"} className="flex-1 gap-1.5 h-7">
+                                    <FileText className={`w-3 h-3 ${hasGitIgnore ? "text-gray-400" : "text-white"}`} />
+                                    {hasGitIgnore ? "Edit .gitignore" : "Create .gitignore"}
+                                </Button>
+                            </div>
+
                             {/* Message Input */}
                             <div className="mb-4">
                                 <textarea 

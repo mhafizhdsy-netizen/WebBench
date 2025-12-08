@@ -1,15 +1,17 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { projectService } from '../services/projectService';
-import { Project, File } from '../types';
+import { Project, File, PublishedProject } from '../types';
 import { Button } from '../components/ui/Button';
 import { CreateProjectModal } from '../components/dashboard/CreateProjectModal';
 import { ShareModal } from '../components/dashboard/ShareModal';
 import { ActionModal, ActionModalConfig } from '../components/dashboard/ActionModal';
 import { SettingsModal } from '../components/dashboard/SettingsModal';
+import { ProfileModal } from '../components/dashboard/ProfileModal';
 import { WebBenchLoader } from '../components/ui/Loader';
 import { SEO } from '../components/ui/SEO';
-import { Plus, FolderOpen, LogOut, Search, Clock, Trash2, Upload, Settings, Box, MoreVertical, Edit, Copy, AlertCircle, X, Share2, WandSparkles, Atom, AppWindow, ServerCog, FileCode2, Square } from 'lucide-react';
+import { Plus, FolderOpen, LogOut, Search, Clock, Trash2, Upload, Settings, Box, MoreVertical, Edit, Copy, AlertCircle, X, Share2, WandSparkles, Atom, AppWindow, ServerCog, FileCode2, Square, Globe, User, Loader2, Heart, Eye } from 'lucide-react';
 import JSZip from 'jszip';
 
 // New Logo Component
@@ -36,17 +38,30 @@ const ProjectIconMap: Record<string, React.FC<any>> = {
 
 
 const Dashboard: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'projects' | 'community'>('projects');
+  
   const [projects, setProjects] = useState<Project[]>([]);
+  const [communityProjects, setCommunityProjects] = useState<PublishedProject[]>([]);
+  
   const [search, setSearch] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  
   const [modalConfig, setModalConfig] = useState<ActionModalConfig | null>(null);
   const [activeContextMenu, setActiveContextMenu] = useState<string | null>(null);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ top: number, right: number } | null>(null);
   const [shareModalProject, setShareModalProject] = useState<Project | null>(null);
+  
+  // Publishing State
+  const [publishModalProject, setPublishModalProject] = useState<Project | null>(null);
+  const [publishTitle, setPublishTitle] = useState('');
+  const [publishDesc, setPublishDesc] = useState('');
+  const [isPublishing, setIsPublishing] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -55,6 +70,7 @@ const Dashboard: React.FC = () => {
   const fetchProjects = async () => {
     try {
       setError(null);
+      setLoading(true);
       const data = await projectService.getProjects();
       setProjects(data);
     } catch (err: any) {
@@ -65,15 +81,42 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    // Handle post-OAuth redirect
-    const redirectPath = localStorage.getItem('redirect_path');
-    if (redirectPath) {
-      localStorage.removeItem('redirect_path');
-      navigate(redirectPath, { replace: true });
+  const fetchCommunityProjects = async () => {
+    try {
+        setLoading(true);
+        const data = await projectService.getCommunityProjects();
+        setCommunityProjects(data);
+    } catch (err: any) {
+        console.error("Failed to fetch community projects", err);
+    } finally {
+        setLoading(false);
     }
-    fetchProjects();
+  };
+
+  useEffect(() => {
+    // Check user and redirect
+    const init = async () => {
+        const user = await projectService.getCurrentUser();
+        setCurrentUser(user);
+        
+        // Handle post-OAuth redirect
+        const redirectPath = localStorage.getItem('redirect_path');
+        if (redirectPath) {
+          localStorage.removeItem('redirect_path');
+          navigate(redirectPath, { replace: true });
+        }
+        fetchProjects();
+    };
+    init();
   }, []);
+  
+  useEffect(() => {
+      if (activeTab === 'community') {
+          fetchCommunityProjects();
+      } else {
+          fetchProjects();
+      }
+  }, [activeTab]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -194,6 +237,21 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const handlePublishProject = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!publishModalProject || !publishTitle) return;
+      setIsPublishing(true);
+      try {
+          await projectService.publishProject(publishModalProject, publishTitle, publishDesc, [publishModalProject.type || 'web']);
+          setPublishModalProject(null);
+          setActiveTab('community');
+      } catch (err: any) {
+          setError(err.message);
+      } finally {
+          setIsPublishing(false);
+      }
+  };
+
   const handleLogout = async () => {
     try {
       await projectService.signOut();
@@ -203,9 +261,12 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const filteredProjects = projects.filter(p => 
-    p.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredProjects = activeTab === 'projects' 
+      ? projects.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+      : communityProjects.filter(p => 
+          p.title.toLowerCase().includes(search.toLowerCase()) || 
+          p.description?.toLowerCase().includes(search.toLowerCase())
+      );
 
   const getProjectIcon = (projectType: Project['type']) => {
     const Icon = ProjectIconMap[projectType || 'default'] || ProjectIconMap['default'];
@@ -228,18 +289,24 @@ const Dashboard: React.FC = () => {
             <div 
               ref={contextMenuRef} 
               style={{ top: `${contextMenuPosition.top}px`, right: `${contextMenuPosition.right}px` }}
-              className="fixed z-30 w-36 md:w-40 bg-[#2d2d30] border border-border rounded-lg shadow-2xl py-1 animate-in fade-in zoom-in-95"
+              className="fixed z-30 w-44 bg-[#2d2d30] border border-border rounded-lg shadow-2xl py-1 animate-in fade-in zoom-in-95"
             >
-                <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'rename', project }); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Edit className="w-3 h-3 md:w-3.5 md:h-3.5"/>Rename</button>
-                <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'duplicate', project }); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Copy className="w-3 h-3 md:w-3.5 md:h-3.5"/>Duplicate</button>
-                <button onClick={(e) => { e.stopPropagation(); setShareModalProject(project); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Share2 className="w-3 h-3 md:w-3.5 md:h-3.5"/>Share</button>
+                <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'rename', project }); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Edit className="w-3.5 h-3.5"/>Rename</button>
+                <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'duplicate', project }); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Copy className="w-3.5 h-3.5"/>Duplicate</button>
+                <button onClick={(e) => { e.stopPropagation(); setShareModalProject(project); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-2 text-gray-300 hover:bg-active hover:text-white transition-colors"><Share2 className="w-3.5 h-3.5"/>Share Link</button>
+                <button onClick={(e) => { e.stopPropagation(); setPublishModalProject(project); setPublishTitle(project.name); setPublishDesc(''); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-2 text-accent hover:bg-active hover:text-white transition-colors"><Globe className="w-3.5 h-3.5"/>Publish to Community</button>
                 <div className="my-1 h-px bg-border mx-1"></div>
-                <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'delete', project }); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-1.5 md:gap-2 text-red-400 hover:bg-red-500/20 transition-colors"><Trash2 className="w-3 h-3 md:w-3.5 md:h-3.5"/>Delete</button>
+                <button onClick={(e) => { e.stopPropagation(); setModalConfig({ type: 'delete', project }); setActiveContextMenu(null); setContextMenuPosition(null); }} className="w-full text-left px-3 py-1.5 md:py-2 text-xs flex items-center gap-2 text-red-400 hover:bg-red-500/20 transition-colors"><Trash2 className="w-3.5 h-3.5"/>Delete</button>
             </div>
           )
       })()}
 
-      <div className="min-h-screen bg-background text-gray-300">
+      <div 
+        className="h-screen w-full bg-background text-gray-300 overflow-y-auto flex flex-col custom-scrollbar"
+        onScroll={() => {
+            if (activeContextMenu) setActiveContextMenu(null);
+        }}
+      >
         <input 
           type="file" 
           ref={fileInputRef} 
@@ -271,60 +338,125 @@ const Dashboard: React.FC = () => {
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
         />
+        
+        <ProfileModal
+            isOpen={isProfileOpen}
+            onClose={() => setIsProfileOpen(false)}
+            currentUser={currentUser}
+        />
+        
+        {/* Publish Modal */}
+        {publishModalProject && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                <div className="w-full max-w-lg bg-sidebar border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                    <div className="flex items-center justify-between p-4 border-b border-border">
+                        <h2 className="text-lg font-semibold text-white">Publish to Web Projects</h2>
+                        <button onClick={() => setPublishModalProject(null)} className="text-gray-400 hover:text-white"><X className="w-5 h-5"/></button>
+                    </div>
+                    <form onSubmit={handlePublishProject} className="p-6 space-y-4">
+                        <p className="text-sm text-gray-400 mb-4">
+                            Publishing <strong>{publishModalProject.name}</strong> will make a snapshot of your code public in the Community hub for others to see and learn from.
+                        </p>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Project Title</label>
+                            <input 
+                                type="text"
+                                value={publishTitle}
+                                onChange={(e) => setPublishTitle(e.target.value)}
+                                className="w-full bg-[#3c3c3c] border border-transparent focus:border-accent text-white rounded px-3 py-2 outline-none"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Description</label>
+                            <textarea 
+                                value={publishDesc}
+                                onChange={(e) => setPublishDesc(e.target.value)}
+                                className="w-full bg-[#3c3c3c] border border-transparent focus:border-accent text-white rounded px-3 py-2 outline-none resize-none h-24"
+                                placeholder="Describe your project..."
+                            />
+                        </div>
+                        <div className="flex justify-end gap-3 pt-2">
+                             <Button type="button" variant="secondary" onClick={() => setPublishModalProject(null)} disabled={isPublishing}>Cancel</Button>
+                             <Button type="submit" disabled={isPublishing || !publishTitle.trim()}>
+                                 {isPublishing && <Loader2 className="w-4 h-4 animate-spin mr-2" />} Publish
+                             </Button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        )}
 
         {/* Header */}
-        <header className="h-12 md:h-14 border-b border-border bg-sidebar flex items-center justify-between px-3 md:px-4 lg:px-8 sticky top-0 z-20 transition-colors duration-300">
+        <header className="h-14 border-b border-border bg-sidebar flex items-center justify-between px-4 lg:px-8 sticky top-0 z-20 transition-colors duration-300 shrink-0">
           <div className="flex items-center gap-2 group cursor-pointer" onClick={() => navigate('/dashboard')}>
-            <div className="w-8 h-8 md:w-9 md:h-9 flex items-center justify-center transition-transform group-hover:scale-105">
-              <WebBenchLogo />
-            </div>
-            <span className="font-bold text-white text-base md:text-lg tracking-tight hidden md:block">WebBench</span>
+            <WebBenchLogo />
+            <span className="font-bold text-white text-lg tracking-tight hidden md:block">WebBench</span>
           </div>
 
-          <div className="flex-1 max-w-xs md:max-w-md mx-2 md:mx-4">
+          <div className="flex-1 max-w-md mx-4">
             <div className="relative group">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 md:w-4 md:h-4 text-gray-500 group-focus-within:text-accent transition-colors" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-accent transition-colors" />
               <input 
                 type="text" 
-                placeholder="Search projects..." 
+                placeholder={activeTab === 'projects' ? "Search your projects..." : "Search community..."}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-background border border-border focus:border-accent text-white rounded-lg pl-9 pr-3 py-1.5 text-xs md:pl-10 md:pr-4 md:py-2 md:text-sm outline-none transition-all duration-300 focus:ring-1 focus:ring-accent/20"
+                className="w-full bg-background border border-border focus:border-accent text-white rounded-lg pl-10 pr-4 py-2 text-sm outline-none transition-all duration-300 focus:ring-1 focus:ring-accent/20"
               />
             </div>
           </div>
 
-          <div className="flex items-center gap-1 md:gap-2">
-            <Button variant="icon" onClick={() => setIsSettingsOpen(true)} title="Settings">
-              <Settings className="w-4 h-4 md:w-5 md:h-5" />
+          <div className="flex items-center gap-2">
+            <Button variant="icon" onClick={() => setIsProfileOpen(true)} title="Profile & Settings">
+              {currentUser?.user_metadata?.avatar_url ? (
+                  <img src={currentUser.user_metadata.avatar_url} alt="Profile" className="w-5 h-5 rounded-full object-cover" />
+              ) : (
+                  <User className="w-5 h-5" />
+              )}
             </Button>
             <Button variant="icon" onClick={handleLogout} title="Logout">
-              <LogOut className="w-4 h-4 md:w-5 md:h-5" />
+              <LogOut className="w-5 h-5" />
             </Button>
           </div>
         </header>
 
-        {/* Main Content */}
-        <main className="p-3 md:p-6 lg:p-8 max-w-7xl mx-auto">
+        {/* Tabs & Main Content */}
+        <main className="p-4 md:p-8 max-w-7xl mx-auto w-full flex-1">
           {error && (
-            <div className="p-3 md:p-4 mb-4 md:mb-6 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-2 md:gap-3 text-red-400 text-xs md:text-sm animate-fade-in">
-              <AlertCircle className="w-4 h-4 md:w-5 md:h-5 shrink-0 mt-0.5" />
+            <div className="p-4 mb-6 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3 text-red-400 text-sm animate-fade-in">
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
               <span>{error}</span>
               <button onClick={() => setError(null)} className="ml-auto p-1 rounded-full hover:bg-white/10">
-                <X className="w-3.5 h-3.5 md:w-4 md:h-4"/>
+                <X className="w-4 h-4"/>
               </button>
             </div>
           )}
           
-          <div className="flex items-center justify-between mb-6 md:mb-8">
-            <h2 className="text-xl md:text-2xl font-bold text-white">Your Projects</h2>
-            <div className="flex gap-2 md:gap-3">
-              <Button onClick={handleImportClick} variant="secondary" size="xs" className="gap-1.5 md:gap-2 md:h-8 md:px-3 md:text-sm" disabled={isImporting}>
-                <Upload className="w-3.5 h-3.5 md:w-4 md:h-4" />
+          <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4">
+             {/* Tab Switcher */}
+            <div className="flex p-1 bg-[#252526] rounded-lg border border-border self-start">
+                 <button 
+                    onClick={() => setActiveTab('projects')}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'projects' ? 'bg-accent text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                 >
+                     Your Projects
+                 </button>
+                 <button 
+                    onClick={() => setActiveTab('community')}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'community' ? 'bg-accent text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                 >
+                     Community
+                 </button>
+            </div>
+
+            <div className="flex gap-3 w-full md:w-auto">
+              <Button onClick={handleImportClick} variant="secondary" size="sm" className="flex-1 md:flex-none justify-center gap-2" disabled={isImporting}>
+                <Upload className="w-4 h-4" />
                 {isImporting ? 'Importing...' : 'Import'}
               </Button>
-              <Button onClick={() => setIsCreateModalOpen(true)} size="xs" className="gap-1.5 md:gap-2 md:h-8 md:px-3 md:text-sm shadow-lg shadow-accent/20 hover:shadow-accent/40 transition-all">
-                <Plus className="w-3.5 h-3.5 md:w-4 md:h-4" />
+              <Button onClick={() => setIsCreateModalOpen(true)} size="sm" className="flex-1 md:flex-none justify-center gap-2 shadow-lg shadow-accent/20 hover:shadow-accent/40 transition-all">
+                <Plus className="w-4 h-4" />
                 New Project
               </Button>
             </div>
@@ -332,55 +464,116 @@ const Dashboard: React.FC = () => {
 
           {loading ? (
             <div className="h-64 flex flex-col items-center justify-center">
-              <WebBenchLoader size="md" text="Loading Projects..." />
-            </div>
-          ) : projects.length === 0 && !error ? (
-            <div className="flex flex-col items-center justify-center py-10 md:py-20 border border-dashed border-border rounded-xl bg-sidebar/30">
-              <div className="w-16 h-16 md:w-20 md:h-20 bg-active rounded-full flex items-center justify-center mb-4 md:mb-6 animate-pulse">
-                <FolderOpen className="w-8 h-8 md:w-10 md:h-10 text-gray-500" />
-              </div>
-              <h3 className="text-lg md:text-xl font-medium text-white mb-1 md:mb-2">No projects yet</h3>
-              <p className="text-xs md:text-sm text-gray-500 mb-6 md:mb-8 text-center max-w-xs">Create your first project to start building the web with AI superpowers.</p>
-              <Button onClick={() => setIsCreateModalOpen(true)} size="md">Create Project</Button>
+              <WebBenchLoader size="md" text={activeTab === 'projects' ? "Loading Projects..." : "Loading Community..."} />
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-              {filteredProjects.map((project) => (
-                <div 
-                  key={project.id}
-                  onClick={() => navigate(`/editor/${project.id}`)}
-                  className="bg-sidebar border border-border rounded-xl p-4 md:p-5 hover:border-accent hover:shadow-xl hover:shadow-black/20 cursor-pointer group transition-all duration-300 relative"
-                >
-                  <button 
-                      onClick={(e) => toggleContextMenu(e, project.id)}
-                      className="absolute top-2 right-2 md:top-3 md:right-3 p-1.5 md:p-2 bg-background/50 hover:bg-active rounded-full text-gray-400 hover:text-white transition-colors backdrop-blur-sm z-10"
-                      aria-label="Project options"
-                    >
-                      <MoreVertical className="w-3.5 h-3.5 md:w-4 md:h-4" />
-                    </button>
+            <>
+                {activeTab === 'projects' && (
+                    projects.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 border border-dashed border-border rounded-xl bg-sidebar/30">
+                          <div className="w-20 h-20 bg-active rounded-full flex items-center justify-center mb-6 animate-pulse">
+                            <FolderOpen className="w-10 h-10 text-gray-500" />
+                          </div>
+                          <h3 className="text-xl font-medium text-white mb-2">No projects yet</h3>
+                          <p className="text-sm text-gray-500 mb-8 text-center max-w-xs">Create your first project to start building the web with AI superpowers.</p>
+                          <Button onClick={() => setIsCreateModalOpen(true)} size="md">Create Project</Button>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {filteredProjects.map((project) => (
+                                <div 
+                                    key={project.id}
+                                    onClick={() => navigate(`/editor/${project.id}`)}
+                                    className="bg-sidebar border border-border rounded-xl p-5 hover:border-accent hover:shadow-xl hover:shadow-black/20 cursor-pointer group transition-all duration-300 relative"
+                                >
+                                    <button 
+                                        onClick={(e) => toggleContextMenu(e, project.id)}
+                                        className="absolute top-3 right-3 p-2 bg-background/50 hover:bg-active rounded-full text-gray-400 hover:text-white transition-colors backdrop-blur-sm z-10"
+                                        aria-label="Project options"
+                                        >
+                                        <MoreVertical className="w-4 h-4" />
+                                        </button>
 
-                  <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
-                    <div className="w-12 h-12 md:w-14 md:h-14 rounded-lg bg-gradient-to-br from-active to-background flex items-center justify-center border border-white/5 shadow-inner group-hover:scale-105 transition-transform duration-300">
-                      {getProjectIcon(project.type)}
-                    </div>
-                    <div className="overflow-hidden">
-                      <h3 className="text-base font-semibold text-white truncate group-hover:text-accent transition-colors md:text-lg">{project.name}</h3>
-                      <p className="text-xs text-gray-500 truncate mt-0.5 md:mt-1">ID: {project.id.slice(0, 8)}...</p>
-                    </div>
-                  </div>
+                                    <div className="flex items-center gap-4 mb-4">
+                                        <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-active to-background flex items-center justify-center border border-white/5 shadow-inner group-hover:scale-105 transition-transform duration-300">
+                                        {getProjectIcon(project.type as any)}
+                                        </div>
+                                        <div className="overflow-hidden">
+                                        <h3 className="text-lg font-semibold text-white truncate group-hover:text-accent transition-colors">{project.name}</h3>
+                                        <p className="text-xs text-gray-500 truncate mt-1">ID: {project.id.slice(0, 8)}...</p>
+                                        </div>
+                                    </div>
 
-                  <div className="flex items-center justify-between text-xs text-gray-500 pt-3 md:pt-4 border-t border-border mt-1 md:mt-2">
-                    <div className="flex items-center gap-1 md:gap-1.5">
-                      <Clock className="w-3 h-3 md:w-3.5 md:h-3.5" />
-                      <span>{new Date(project.updatedAt).toLocaleDateString()}</span>
-                    </div>
-                    <span className="bg-active px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-gray-400 border border-white/5 group-hover:border-white/10 transition-colors">
-                      {Object.keys(project.files).length} files
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                                    <div className="flex items-center justify-between text-xs text-gray-500 pt-4 border-t border-border mt-2">
+                                        <div className="flex items-center gap-1.5">
+                                        <Clock className="w-3.5 h-3.5" />
+                                        <span>{new Date(project.updatedAt).toLocaleDateString()}</span>
+                                        </div>
+                                        <span className="bg-active px-2.5 py-1 rounded-full text-gray-400 border border-white/5 group-hover:border-white/10 transition-colors">
+                                        {Object.keys(project.files).length} files
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )
+                )}
+
+                {activeTab === 'community' && (
+                     (filteredProjects as PublishedProject[]).length === 0 ? (
+                        <div className="text-center py-20 bg-[#252526] rounded-xl border border-border">
+                            <Globe className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                            <h2 className="text-xl font-semibold text-white">No community projects found</h2>
+                            <p className="text-gray-500 mt-2">Be the first to publish a project!</p>
+                        </div>
+                     ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {(filteredProjects as PublishedProject[]).map((project) => (
+                                <div 
+                                    key={project.id} 
+                                    onClick={() => navigate(`/community/${project.id}`)}
+                                    className="bg-sidebar border border-border rounded-xl overflow-hidden hover:border-accent/50 hover:shadow-2xl transition-all cursor-pointer group flex flex-col h-full"
+                                >
+                                    <div className="h-40 bg-[#1e1e1e] relative overflow-hidden group-hover:scale-[1.02] transition-transform duration-500">
+                                        <div className="absolute inset-0 flex items-center justify-center opacity-30">
+                                            <Globe className="w-20 h-20 text-gray-700" />
+                                        </div>
+                                        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-sidebar to-transparent">
+                                            <div className="flex gap-2">
+                                                {project.tags.slice(0, 3).map(tag => (
+                                                    <span key={tag} className="text-[10px] bg-accent/20 text-accent px-2 py-0.5 rounded-full border border-accent/30 backdrop-blur-sm">
+                                                        {tag}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="p-5 flex flex-col flex-1">
+                                        <h3 className="text-lg font-bold text-white mb-1 truncate group-hover:text-accent transition-colors">{project.title}</h3>
+                                        <p className="text-sm text-gray-400 line-clamp-2 mb-4 flex-1">{project.description || "No description provided."}</p>
+                                        
+                                        <div className="flex items-center justify-between pt-4 border-t border-border mt-auto">
+                                            <div className="flex items-center gap-2">
+                                                {project.author.avatar_url ? (
+                                                    <img src={project.author.avatar_url} alt={project.author.name} className="w-6 h-6 rounded-full bg-gray-700 object-cover" />
+                                                ) : (
+                                                    <div className="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center"><User className="w-3 h-3 text-gray-400" /></div>
+                                                )}
+                                                <span className="text-xs text-gray-300 font-medium truncate max-w-[100px]">{project.author.name}</span>
+                                            </div>
+                                            <div className="flex items-center gap-3 text-xs text-gray-500">
+                                                <div className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" /> {project.views_count}</div>
+                                                <div className="flex items-center gap-1"><Heart className="w-3.5 h-3.5" /> {project.likes_count}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                     )
+                )}
+            </>
           )}
         </main>
       </div>

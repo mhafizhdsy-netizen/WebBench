@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { supabase } from './services/supabaseClient';
@@ -6,6 +7,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import SharePage from './pages/SharePage';
 import Editor from './pages/Editor';
+import Community from './pages/Community';
 import { Loader2 } from 'lucide-react';
 import { ResetPassword } from './components/auth/ResetPassword';
 
@@ -71,7 +73,21 @@ const App: React.FC = () => {
       <HashRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          
+          {/* Public Shares (direct link to private project via ID, requires permission or auth) */}
           <Route path="/share/:projectId" element={<SharePage />} />
+          
+          {/* Community Published Projects (Publicly viewable) */}
+          <Route path="/community/:projectId" element={<SharePage isPublished={true} />} />
+          
+          <Route 
+            path="/community" 
+            element={
+              <PrivateRoute>
+                <Community />
+              </PrivateRoute>
+            }
+          />
           <Route 
             path="/dashboard" 
             element={

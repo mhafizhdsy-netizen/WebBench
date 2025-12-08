@@ -23,6 +23,31 @@ export interface Project {
   files: Record<string, File>;
   lastOpenedFile?: string;
   type?: 'blank' | 'starter' | 'react-vite' | 'nextjs' | 'laravel' | 'python' | 'php' | 'cpp';
+  user_id?: string;
+}
+
+export interface Profile {
+  id: string;
+  email: string; // Optional, usually derived from Auth
+  name: string;
+  avatar_url?: string;
+}
+
+export interface PublishedProject {
+  id: string;
+  title: string;
+  description: string;
+  user_id: string;
+  author: {
+    name: string;
+    avatar_url: string;
+  };
+  files: Record<string, File>;
+  type: Project['type'];
+  tags: string[];
+  views_count: number;
+  likes_count: number;
+  created_at: string; // ISO String
 }
 
 export interface ChatSession {

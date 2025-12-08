@@ -1,23 +1,32 @@
+
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { projectService } from '../services/projectService';
 import { Button } from '../components/ui/Button';
 import { WebBenchLoader } from '../components/ui/Loader';
 import { SEO } from '../components/ui/SEO';
-import { Mail, Lock, AlertCircle, ArrowRight, Github, Cpu, Sparkles, CheckCircle2, ArrowLeft, Loader2 } from 'lucide-react';
+import { Mail, Lock, AlertCircle, ArrowRight, Github, Cpu, Sparkles, CheckCircle2, ArrowLeft, Loader2, User } from 'lucide-react';
 
 type AuthMode = 'login' | 'signup' | 'forgot';
-
-// --- Sub-components moved outside the main component to prevent re-rendering on state change ---
 
 const AuthFormComponent = ({ 
   handleAuth, 
   email, setEmail, 
-  password, setPassword, 
+  password, setPassword,
+  name, setName,
   setMode, clearState, 
   loading, mode 
 }: any) => (
   <form onSubmit={handleAuth} className="space-y-4">
+    {mode === 'signup' && (
+      <div className="space-y-1.5 animate-fade-in">
+        <label className="text-sm font-medium text-gray-300 ml-1">Full Name</label>
+        <div className="relative group">
+          <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-gray-500 group-focus-within:text-accent transition-colors" />
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full bg-[#252526] border border-border focus:border-accent text-white rounded-lg px-3 py-2 text-sm md:px-4 md:py-3 md:text-base pl-9 md:pl-10 outline-none transition-all focus:ring-1 focus:ring-accent/50 placeholder:text-gray-600" placeholder="John Doe" required={mode === 'signup'} />
+        </div>
+      </div>
+    )}
     <div className="space-y-1.5">
       <label className="text-sm font-medium text-gray-300 ml-1">Email</label>
       <div className="relative group">
@@ -28,7 +37,7 @@ const AuthFormComponent = ({
     <div className="space-y-1.5">
       <div className="flex justify-between items-center">
         <label className="text-sm font-medium text-gray-300 ml-1">Password</label>
-        <button type="button" onClick={() => { setMode('forgot'); clearState(); }} className="text-xs text-accent/80 hover:text-accent hover:underline">Forgot?</button>
+        {mode === 'login' && <button type="button" onClick={() => { setMode('forgot'); clearState(); }} className="text-xs text-accent/80 hover:text-accent hover:underline">Forgot?</button>}
       </div>
       <div className="relative group">
         <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-gray-500 group-focus-within:text-accent transition-colors" />
@@ -74,6 +83,7 @@ const Login: React.FC = () => {
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -87,6 +97,7 @@ const Login: React.FC = () => {
     setSuccessMessage(null);
     setEmail('');
     setPassword('');
+    setName('');
   };
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -97,7 +108,8 @@ const Login: React.FC = () => {
 
     try {
       if (mode === 'signup') {
-        await projectService.signUp(email, password);
+        // Sign up with Name
+        await projectService.signUp(email, password, name);
         setSuccessMessage("Account created! Please check your email to verify your account.");
         setMode('login');
         setPassword('');
@@ -192,6 +204,8 @@ const Login: React.FC = () => {
                 setEmail={setEmail}
                 password={password}
                 setPassword={setPassword}
+                name={name}
+                setName={setName}
                 setMode={setMode}
                 clearState={clearState}
                 loading={loading}

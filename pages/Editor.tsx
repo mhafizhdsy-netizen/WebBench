@@ -27,7 +27,8 @@ type SidebarView = 'files' | 'search' | 'git';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 export type StartupStatus = 'idle' | 'booting' | 'mounting' | 'installing' | 'starting' | 'running' | 'error';
 
-const FILE_CODE_BLOCK_FULL_REGEX = /```[a-zA-Z]*\s*\n(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)[\s\S]*?```/g;
+// Updated regex to support # comments (Python, YAML, etc) and be more permissive with whitespace
+const FILE_CODE_BLOCK_FULL_REGEX = /```[a-zA-Z]*\s*[\r\n]+(?:<!--|\/\/|\/\*|#)\s*(\/?[a-zA-Z0-9_\-\.\/]+)[\s\S]*?```/g;
 
 const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
   let timeout: ReturnType<typeof setTimeout> | null = null;
@@ -121,6 +122,22 @@ const Editor: React.FC = () => {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  // Define handleCreateSession before loadInitialData to avoid linter warnings about using before declaration,
+  // although function hoisting or closure capturing would work, it's cleaner.
+  const handleCreateSession = async (arg?: any) => {
+    // If arg is a string, use it. Otherwise (e.g. event object), use projectId from params.
+    const targetProjectId = typeof arg === 'string' ? arg : projectId;
+    
+    if (!targetProjectId) return;
+    try {
+      const newSession = await projectService.createChatSession(targetProjectId, `Chat ${chatSessions.length + 1}`);
+      setChatSessions(prev => [newSession, ...prev]);
+      setActiveSessionId(newSession.id);
+    } catch(e: any) {
+      setActionError(e.message);
+    }
+  };
+
   const loadInitialData = useCallback(async () => {
     if (!projectId) {
       setLoadError("Project ID is missing.");
@@ -163,7 +180,7 @@ const Editor: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId]); // handleCreateSession is stable or handled via closure in the component scope
   
   const streamToLog = useCallback(async (process: any, onData: (data: string) => void) => {
     const reader = process.output.getReader();
@@ -339,17 +356,6 @@ const Editor: React.FC = () => {
   }, [isChatModalOpen]);
 
 
-  const handleCreateSession = async (pId = projectId) => {
-    if (!pId) return;
-    try {
-      const newSession = await projectService.createChatSession(pId, `Chat ${chatSessions.length + 1}`);
-      setChatSessions(prev => [newSession, ...prev]);
-      setActiveSessionId(newSession.id);
-    } catch(e: any) {
-      setActionError(e.message);
-    }
-  };
-
   const toggleSidebar = (view: SidebarView) => {
     if (isSidebarOpen && sidebarView === view) {
       setIsSidebarOpen(false);
@@ -423,68 +429,71 @@ const Editor: React.FC = () => {
     a.click();
     window.URL.revokeObjectURL(url);
   };
-
-  const handleAIChanges = (filesToProcess: any[], initialFilePaths: Set<string>): Promise<FileAction[]> => {
-    if (!project || !projectId) return Promise.resolve([]);
-    let updatedFiles = { ...project.files };
-    const changedFileActions: FileAction[] = [];
-    let newOpenFiles = [...openFiles];
-
-    filesToProcess.forEach((f: any) => {
-      const path = f.path.startsWith('/') ? f.path : '/' + f.path;
-      const actionFromAI = f.action as 'create' | 'update' | 'delete';
-
-      if (actionFromAI === 'delete') {
-        changedFileActions.push({ action: 'delete', path });
-        Object.keys(updatedFiles).forEach(key => {
-          if (key === path || key.startsWith(path + '/')) {
-            delete updatedFiles[key];
-            if (activeFile === key) setActiveFile(null);
-            newOpenFiles = newOpenFiles.filter(op => op !== key);
-          }
-        });
-      } else {
-        const fileExisted = initialFilePaths.has(path);
-        const effectiveAction = fileExisted ? 'update' : 'create';
-        changedFileActions.push({ action: effectiveAction, path });
-        
-        if (f.type === 'folder') {
-          const folderPath = path.endsWith('/') ? path.slice(0, -1) : path;
-          const keepFilePath = `${folderPath}/.keep`;
-          if (!updatedFiles[keepFilePath]) {
-            updatedFiles[keepFilePath] = {
-              path: keepFilePath, name: '.keep',
-              type: 'plaintext', content: '',
-              lastModified: Date.now()
-            };
-          }
-        } else {
-          updatedFiles[path] = {
-            path, name: path.split('/').pop()!,
-            type: f.type || 'plaintext', content: f.content || '',
-            lastModified: Date.now()
+  
+  const handleUpdateFiles = useCallback(async (files: Record<string, ProjectFile>) => {
+      setProject(prev => {
+          if (!prev) return null;
+          return {
+              ...prev,
+              files: { ...prev.files, ...files }
           };
-          if (!newOpenFiles.includes(path) && newOpenFiles.length < 10) {
-            newOpenFiles.push(path);
-          }
-          if (!activeFile) {
-            setActiveFile(path);
-          }
-        }
-      }
+      });
+      setRefreshTrigger(p => p + 1);
+  }, []);
+
+  const handleAIChanges = useCallback((filesToProcess: any[], initialFilePaths: Set<string>): Promise<FileAction[]> => {
+    const changedFileActions: FileAction[] = filesToProcess.map((f: any) => {
+       const path = f.path.startsWith('/') ? f.path : '/' + f.path;
+       return { 
+           action: f.action === 'delete' ? 'delete' : (initialFilePaths.has(path) ? 'update' : 'create'), 
+           path 
+       };
     });
 
+    setProject(prev => {
+        if (!prev) return null;
+        const updatedFiles = { ...prev.files };
+        
+        filesToProcess.forEach((f: any) => {
+           const path = f.path.startsWith('/') ? f.path : '/' + f.path;
+           if (f.action === 'delete') {
+               delete updatedFiles[path];
+               // Simple delete, not handling folder recursion here as AI typically sends discrete files
+           } else {
+               updatedFiles[path] = {
+                   path, 
+                   name: path.split('/').pop() || '',
+                   type: f.type || 'plaintext',
+                   content: f.content || '',
+                   lastModified: Date.now()
+               };
+               // Ensure .keep file for folder creation context if strictly needed, but file existence implies folder
+           }
+        });
+        return { ...prev, files: updatedFiles };
+    });
+    
     setHighlightedFiles(new Set(changedFileActions.map(a => a.path)));
     setTimeout(() => setHighlightedFiles(new Set()), 4000);
 
-    setProject({ ...project, files: updatedFiles });
-    setOpenFiles(newOpenFiles);
-    if (activeFile && !updatedFiles[activeFile]) {
-        setActiveFile(newOpenFiles.length > 0 ? newOpenFiles[newOpenFiles.length - 1] : null);
-    }
+    setOpenFiles(prevOpen => {
+        const newOpen = [...prevOpen];
+        filesToProcess.forEach((f: any) => {
+            const path = f.path.startsWith('/') ? f.path : '/' + f.path;
+            if (f.action !== 'delete' && !newOpen.includes(path) && newOpen.length < 10) {
+                newOpen.push(path);
+            }
+        });
+        return newOpen;
+    });
+    
+    // Auto-select last modified file if none active or if relevant
+    // setActiveFile logic is better handled by user interaction or explicit "open" intent, 
+    // but here we just ensure the file exists in open tabs.
+
     setRefreshTrigger(p => p + 1);
     return Promise.resolve(changedFileActions);
-  };
+  }, []);
 
   const updateMessageInState = (sessionId: string, message: ChatMessage) => {
     setChatSessions(prevSessions =>
@@ -565,7 +574,7 @@ const Editor: React.FC = () => {
         let currentLiveStreamData: ChatMessage['liveStream'] | undefined = undefined;
         let contentForMarkdown = textForLiveParsing;
 
-        const lastOpeningFenceMatch = [...textForLiveParsing.matchAll(/```(\w*)\s*\n/g)].pop();
+        const lastOpeningFenceMatch = [...textForLiveParsing.matchAll(/```(\w*)\s*[\r\n]+/g)].pop();
         if (lastOpeningFenceMatch) {
             const lastOpeningFenceIndex = lastOpeningFenceMatch.index!;
             const contentAfterLastOpen = textForLiveParsing.substring(lastOpeningFenceIndex);
@@ -573,13 +582,13 @@ const Editor: React.FC = () => {
             if (!contentAfterLastOpen.substring(lastOpeningFenceMatch[0].length).includes('```')) {
                 const language = lastOpeningFenceMatch[1] || 'plaintext';
                 const codeContent = contentAfterLastOpen.substring(lastOpeningFenceMatch[0].length);
-                const pathMatch = codeContent.match(/^(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)/);
+                const pathMatch = codeContent.match(/^(?:<!--|\/\/|\/\*|#)\s*(\/?[a-zA-Z0-9_\-\.\/]+)/);
                 
                 if (pathMatch && language.toLowerCase() !== 'json') {
                     currentLiveStreamData = {
                         currentFile: pathMatch[1],
                         language: language,
-                        currentCode: codeContent.replace(/^(?:<!--|\/\/|\/\*)\s*(\/[a-zA-Z0-9_\-\.\/]+)\s*(\*\/)?\n?/, ''),
+                        currentCode: codeContent.replace(/^(?:<!--|\/\/|\/\*|#)\s*(\/?[a-zA-Z0-9_\-\.\/]+)\s*(\*\/)?\n?/, ''),
                     };
                     contentForMarkdown = textForLiveParsing.substring(0, lastOpeningFenceIndex).trim();
                 }
@@ -610,32 +619,39 @@ const Editor: React.FC = () => {
       let isError = false;
       let errorContent = '';
       
+      // Better strategy: Use JSON if valid, else fall back to regex
+      let usedJson = false;
       if (jsonMatch && jsonMatch[1]) {
         try {
           const sanitizedJson = jsonMatch[1].trim().replace(/,(?=\s*?[\}\]])/g, '');
           const response = JSON.parse(sanitizedJson);
-          if (response.files && Array.isArray(response.files) && response.files.length > 0) {
+          if (response.files && Array.isArray(response.files)) {
             completedActions = await handleAIChanges(response.files, initialFilePaths);
+            usedJson = true;
           }
         } catch (e: any) {
-          console.error("Failed to parse AI JSON response", e, "Raw JSON:", jsonMatch[1]);
-          isError = true;
-          errorContent = `Sorry, I couldn't process the file changes due to a formatting error in my response. Here's my explanation:\n\n${fullText.replace(jsonBlockRegex, '')}\n\n**Faulty JSON block:**\n\`\`\`json\n${jsonMatch[1]}\n\`\`\``;
+          console.warn("Failed to parse AI JSON response, falling back to code block matching", e);
         }
-      } else {
+      }
+      
+      if (!usedJson) {
         const matches = [...fullText.matchAll(FILE_CODE_BLOCK_FULL_REGEX)];
         if (matches.length > 0) {
           const filesToProcess = matches.map(match => {
             const path = match[1];
             const fullBlock = match[0];
             const content = fullBlock
-              .replace(/```[a-zA-Z]*\s*\n(?:<!--|\/\/|\/\*)\s*.*?\s*(\*\/)?\s*\n/, '')
+              .replace(/```[a-zA-Z]*\s*[\r\n]+(?:<!--|\/\/|\/\*|#)\s*.*?\s*(\*\/)?\s*[\r\n]+/, '')
               .replace(/```\s*$/, '');
             const typeMatch = path.match(/\.([^.]+)$/);
             const type = typeMatch ? typeMatch[1] : 'plaintext';
             return { action: initialFilePaths.has(path) ? 'update' : 'create', path, content, type };
           });
           completedActions = await handleAIChanges(filesToProcess, initialFilePaths);
+        } else if (jsonMatch && jsonMatch[1]) {
+            // Only error if we had a JSON block (intention to send files) but it failed AND regex found nothing
+             isError = true;
+             errorContent = `Sorry, I couldn't process the file changes due to a formatting error in my response. Here's my explanation:\n\n${fullText.replace(jsonBlockRegex, '')}`;
         }
       }
       
@@ -1201,7 +1217,7 @@ const Editor: React.FC = () => {
                       <div className="w-56 md:w-64 lg:w-72 h-full bg-sidebar border-r border-border flex flex-col shrink-0">
                           {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={handleFileSelect} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />}
                           {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-7 h-7 md:w-8 md:h-8 mx-auto mb-2 opacity-50" />Global search coming soon</div>}
-                          {sidebarView === 'git' && <GitPanel project={project} checkpoints={checkpoints} onCreateCheckpoint={async (msg, files) => { await handleCreateCheckpoint(msg, files); }} onRefresh={() => setRefreshTrigger(p => p + 1)} />}
+                          {sidebarView === 'git' && <GitPanel project={project} checkpoints={checkpoints} onCreateCheckpoint={async (msg, files) => { await handleCreateCheckpoint(msg, files); }} onRefresh={() => setRefreshTrigger(p => p + 1)} onUpdateFiles={handleUpdateFiles} />}
                       </div>
                   </div>
               </div>
@@ -1225,7 +1241,7 @@ const Editor: React.FC = () => {
                    </div>
 
                   {sidebarView === 'files' && <FileExplorer files={project.files} activeFile={activeFile} highlightedFiles={highlightedFiles} onFileSelect={path => { handleFileSelect(path); setIsSidebarOpen(false); }} onCreate={handleCreateFile} onRename={handleRenameFile} onDelete={handleDeleteFile} onDuplicate={handleDuplicateFile} isMobile={isMobile} />}
-                  {sidebarView === 'git' && <GitPanel project={project} checkpoints={checkpoints} onCreateCheckpoint={async (msg, files) => { await handleCreateCheckpoint(msg, files); setIsSidebarOpen(false); }} onRefresh={() => setRefreshTrigger(p => p + 1)} />}
+                  {sidebarView === 'git' && <GitPanel project={project} checkpoints={checkpoints} onCreateCheckpoint={async (msg, files) => { await handleCreateCheckpoint(msg, files); setIsSidebarOpen(false); }} onRefresh={() => setRefreshTrigger(p => p + 1)} onUpdateFiles={handleUpdateFiles} />}
                   
                    {/* Fallback for Search if selected somehow */}
                    {sidebarView === 'search' && <div className="p-4 text-gray-500 text-sm text-center mt-10"><Search className="w-7 h-7 md:w-8 md:h-8 mx-auto mb-2 opacity-50" />Search coming soon</div>}
