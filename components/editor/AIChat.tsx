@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { File, ChatMessage, ChatSession, FileAction, LogEntry } from '../../types';
@@ -116,6 +117,12 @@ const MODEL_CONFIG: Record<ModelName, { name: string; description: string; icon:
 
 // Process Indicator Component
 const ProcessIndicator = ({ content }: { content: string }) => {
+  // Only show process indicator if the content suggests an action-oriented request
+  // by containing a phase header.
+  if (!content.toLowerCase().includes('phase 1: planning')) {
+    return null;
+  }
+
   const lowerContent = content.toLowerCase();
   
   // Explicit Phase Detection based on new System Instructions

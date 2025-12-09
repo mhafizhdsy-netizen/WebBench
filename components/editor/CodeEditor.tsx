@@ -9,7 +9,7 @@ import {
   MessageSquare, Copy, List, FoldVertical, UnfoldVertical,
   Scissors, XCircle, AlertTriangle, Terminal, FileCode2, Atom, TerminalSquare,
   Command, ZoomIn, ZoomOut, Eye, ArrowUpToLine, ArrowDownToLine, 
-  Type, ListTree, RefreshCcw, Braces, Expand, Shrink, Layout, Image as ImageIcon,
+  Type, ListTree, RefreshCcw, Braces, Expand, Shrink, Layout, ImageIcon,
   Save, Disc
 } from 'lucide-react';
 
@@ -144,8 +144,6 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     }
   };
 
-  const file = activeFile ? files[activeFile] : null;
-
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -181,12 +179,6 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
           const current = editorRef.current.getOption(monacoRef.current.editor.EditorOption.renderWhitespace);
           editorRef.current.updateOptions({ renderWhitespace: current === 'none' ? 'all' : 'none' });
           break;
-      case 'toggleWordWrap': 
-          updateEditorSettings({ wordWrap: editorSettings.wordWrap === 'on' ? 'off' : 'on' });
-          break;
-      case 'toggleMinimap':
-          updateEditorSettings({ minimap: !editorSettings.minimap });
-          break;
       case 'toggleAutoSave':
           updateEditorSettings({ autoSave: !editorSettings.autoSave });
           break;
@@ -209,6 +201,9 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     onToggleTerminal();
     setShowMenu(false);
   };
+
+  // Fix: Derive the activeFile data
+  const activeFileData = activeFile ? files[activeFile] : null;
 
   const getLanguage = (type: File['type']) => {
     switch (type) {
@@ -370,12 +365,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
               <button onClick={() => triggerAction('toggleWhitespace')} className="w-full text-left px-3 py-1.5 md:py-2 text-xs text-gray-300 hover:bg-[#094771] hover:text-white flex items-center gap-2">
                 <Eye className="w-3 h-3 md:w-3.5 md:h-3.5" /> Toggle Whitespace
               </button>
-              <button onClick={() => triggerAction('toggleWordWrap')} className="w-full text-left px-3 py-1.5 md:py-2 text-xs text-gray-300 hover:bg-[#094771] hover:text-white flex items-center gap-2">
-                <Layout className="w-3 h-3 md:w-3.5 md:h-3.5" /> Toggle Word Wrap <span className="ml-auto opacity-50 text-[9px] md:text-[10px]">{editorSettings.wordWrap === 'on' ? 'ON' : 'OFF'}</span>
-              </button>
-               <button onClick={() => triggerAction('toggleMinimap')} className="w-full text-left px-3 py-1.5 md:py-2 text-xs text-gray-300 hover:bg-[#094771] hover:text-white flex items-center gap-2">
-                <Layout className="w-3 h-3 md:w-3.5 md:h-3.5" /> Toggle Minimap <span className="ml-auto opacity-50 text-[9px] md:text-[10px]">{editorSettings.minimap ? 'ON' : 'OFF'}</span>
-              </button>
+              {/* Removed Word Wrap toggle from this menu */}
+              {/* Removed Minimap toggle from this menu */}
                <button onClick={() => triggerAction('format')} className="w-full text-left px-3 py-1.5 md:py-2 text-xs text-gray-300 hover:bg-[#094771] hover:text-white flex items-center gap-2">
                 <AlignLeft className="w-3 h-3 md:w-3.5 md:h-3.5" /> Format Document <span className="ml-auto opacity-50 text-[9px] md:text-[10px]">Alt+Shift+F</span>
               </button>
@@ -430,26 +421,28 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
       {renderBreadcrumbs()}
 
       <div className="flex-1 relative">
-        {file ? (
-          file.type === 'image' ? (
+        {/* Fix: Use activeFileData instead of undeclared 'file' variable */}
+        {activeFileData ? (
+          activeFileData.type === 'image' ? (
              <div className="h-full w-full flex items-center justify-center bg-gray-900 overflow-auto p-4">
-                 <img src={file.content.startsWith('data:') ? file.content : `data:image/png;base64,${file.content}`} alt={file.name} className="max-w-full max-h-full object-contain shadow-2xl" />
+                 {/* Fix: Use activeFileData.content instead of undeclared 'file.content' */}
+                 <img src={activeFileData.content.startsWith('data:') ? activeFileData.content : `data:image/png;base64,${activeFileData.content}`} alt={activeFileData.name} className="max-w-full max-h-full object-contain shadow-2xl" />
              </div>
           ) : (
             <Editor
               height="100%"
-              path={file.path} 
-              language={getLanguage(file.type)}
-              value={file.content}
+              path={activeFileData.path} 
+              language={getLanguage(activeFileData.type)}
+              value={activeFileData.content}
               onChange={onChange}
               theme={currentTheme}
               beforeMount={handleEditorWillMount}
               onMount={handleEditorDidMount}
               options={{
-                minimap: { enabled: isMobile ? false : editorSettings.minimap },
+                minimap: { enabled: editorSettings.minimap }, // Always respect setting
                 fontSize: editorSettings.fontSize,
-                wordWrap: editorSettings.wordWrap,
-                lineNumbers: isMobile ? 'off' : editorSettings.lineNumbers,
+                wordWrap: editorSettings.wordWrap, // Always respect setting
+                lineNumbers: editorSettings.lineNumbers, // Always respect setting
                 formatOnType: editorSettings.formatOnType,
                 formatOnPaste: true,
                 scrollBeyondLastLine: false,
@@ -489,7 +482,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
          </div>
          
          <div className="flex items-center gap-3 md:gap-4">
-            {file && (
+            {/* Fix: Conditionally render based on activeFileData */}
+            {activeFileData && (
                 <>
                     {selectionLabel && (
                         <div className="cursor-pointer hover:text-white" title="Selection">
@@ -499,8 +493,9 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
                     <div className="cursor-pointer hover:text-white" title="Cursor Position">
                         Ln {cursorPosition.lineNumber}, Col {cursorPosition.column}
                     </div>
+                    {/* Fix: Use activeFileData.type */}
                     <div className="cursor-pointer hover:text-white uppercase" title="Language Mode">
-                        {getLanguage(file.type)}
+                        {getLanguage(activeFileData.type)}
                     </div>
                 </>
             )}

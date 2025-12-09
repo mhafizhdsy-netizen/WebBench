@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { PublishedProject, File } from '../../types';
 import { Globe, User, Eye, Heart } from 'lucide-react';
@@ -83,13 +84,13 @@ export const CommunityProjectCard: React.FC<CommunityProjectCardProps> = ({ proj
   return (
     <div 
        onClick={onClick}
-       className="bg-sidebar border border-border rounded-xl overflow-hidden hover:border-accent/50 hover:shadow-2xl transition-all cursor-pointer group flex flex-col h-full"
+       className="bg-sidebar border border-border rounded-xl overflow-hidden hover:border-accent/50 hover:shadow-2xl transition-all cursor-pointer group flex flex-col h-full relative"
     >
         <div className="h-40 bg-[#1e1e1e] relative overflow-hidden group-hover:scale-[1.02] transition-transform duration-500">
             {previewUrl ? (
                  <iframe
                     src={previewUrl}
-                    className="w-[200%] h-[200%] border-0 pointer-events-none select-none transform scale-50 origin-top-left"
+                    className="w-[200%] h-[200%] border-0 pointer-events-none select-none transform scale-50 origin-top-left z-0"
                     tabIndex={-1}
                     title="Project Preview"
                  />
@@ -98,8 +99,10 @@ export const CommunityProjectCard: React.FC<CommunityProjectCardProps> = ({ proj
                     <Globe className="w-20 h-20 text-gray-700" />
                 </div>
             )}
-            <div className="absolute inset-0 bg-transparent" />
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-sidebar to-transparent pointer-events-none">
+            {/* Overlay to ensure clicks are captured by the card, not the iframe */}
+            <div className="absolute inset-0 bg-transparent z-10" />
+            
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-sidebar to-transparent pointer-events-none z-20">
                 <div className="flex gap-2">
                     {project.tags.slice(0, 3).map(tag => (
                         <span key={tag} className="text-[10px] bg-accent/20 text-accent px-2 py-0.5 rounded-full border border-accent/30 backdrop-blur-sm">
@@ -110,7 +113,7 @@ export const CommunityProjectCard: React.FC<CommunityProjectCardProps> = ({ proj
             </div>
         </div>
         
-        <div className="p-5 flex flex-col flex-1">
+        <div className="p-5 flex flex-col flex-1 z-20 relative bg-sidebar">
             <h3 className="text-lg font-bold text-white mb-1 truncate group-hover:text-accent transition-colors">{project.title}</h3>
             <p className="text-sm text-gray-400 line-clamp-2 mb-4 flex-1">{project.description || "No description provided."}</p>
             

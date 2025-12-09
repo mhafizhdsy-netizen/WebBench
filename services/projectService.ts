@@ -1,4 +1,5 @@
 
+
 import { supabase } from './supabaseClient';
 import { Project, File, ChatSession, ChatMessage, Checkpoint, Profile, PublishedProject } from '../types';
 
@@ -145,7 +146,7 @@ export const projectService = {
     }
   },
 
-  async signInWithOAuth(provider) {
+  async signInWithOAuth(provider: 'github') {
     try {
       const { error } = await supabase.auth.signInWithOAuth({ provider });
       if (error) throw error;
@@ -506,9 +507,9 @@ export const projectService = {
     }
   },
   
-  async deleteChatMessage(messageId: string) {
+  async deleteChatMessage(message: string) {
     try {
-      const { error } = await supabase.from('chat_messages').delete().eq('id', messageId);
+      const { error } = await supabase.from('chat_messages').delete().eq('id', message);
       if (error) throw error;
     } catch (error: any) {
       throw new Error((error as Error).message || 'Failed to delete message.');

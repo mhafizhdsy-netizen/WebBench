@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { projectService } from '../services/projectService';
@@ -12,17 +13,9 @@ import { ProfileModal } from '../components/dashboard/ProfileModal';
 import { CommunityProjectCard } from '../components/dashboard/CommunityProjectCard';
 import { WebBenchLoader } from '../components/ui/Loader';
 import { SEO } from '../components/ui/SEO';
+import { WebBenchLogo } from '../components/ui/WebBenchLogo'; // Imported from new file
 import { Plus, FolderOpen, LogOut, Search, Clock, Trash2, Upload, Settings, Box, MoreVertical, Edit, Copy, AlertCircle, X, Share2, WandSparkles, Atom, AppWindow, ServerCog, FileCode2, Square, Globe, User, Loader2, Heart, Eye } from 'lucide-react';
 import JSZip from 'jszip';
-
-// New Logo Component
-const WebBenchLogo = ({ className = "w-8 h-8" }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 2l9 4.9V17L12 22l-9-4.9V7z" className="text-accent fill-accent/20" />
-    <path d="M9.5 10l-2.5 2.5 2.5 2.5" className="text-white" />
-    <path d="M14.5 10l2.5 2.5-2.5 2.5" className="text-white" />
-  </svg>
-);
 
 // Map project types to icons
 const ProjectIconMap: Record<string, React.FC<any>> = {

@@ -6,10 +6,14 @@ import { ThemeProvider } from './context/ThemeContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import SharePage from './pages/SharePage';
-import Editor from './pages/Editor';
+// Fix: Changed default import to named import for Editor component
+import { Editor } from './pages/Editor';
 import Community from './pages/Community';
 import { Loader2 } from 'lucide-react';
 import { ResetPassword } from './components/auth/ResetPassword';
+import { WebBenchLogo } from './components/ui/WebBenchLogo'; // Import WebBenchLogo
+// Fix: Imported WebBenchLoader
+import { WebBenchLoader } from './components/ui/Loader'; 
 
 // Private Route Wrapper
 interface PrivateRouteProps {
@@ -42,7 +46,7 @@ const PrivateRoute: React.FC<PrivateRouteProps> = ({ children }) => {
   if (loading) {
     return (
       <div className="h-screen w-screen bg-background flex items-center justify-center text-accent">
-        <Loader2 className="animate-spin w-7 h-7 md:w-8 md:h-8" />
+        <WebBenchLoader size="md" /> {/* Use WebBenchLoader for consistency */}
       </div>
     );
   }

@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { projectService } from '../services/projectService';
@@ -141,6 +142,7 @@ const SharePage: React.FC<SharePageProps> = ({ isPublished = false }) => {
             const blobUrls: string[] = [];
 
             const resolvePath = (base: string, relative: string) => {
+                if (relative.startsWith('/')) return relative;
                 const stack = base.split('/').slice(0, -1);
                 const parts = relative.split('/');
                 for (const part of parts) {
@@ -153,7 +155,7 @@ const SharePage: React.FC<SharePageProps> = ({ isPublished = false }) => {
 
             content = content.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/g, (match, href) => {
                 if (href.startsWith('http') || href.startsWith('//')) return match;
-                const absPath = href.startsWith('/') ? href : resolvePath(htmlFile.path, href);
+                const absPath = resolvePath(htmlFile.path, href);
                 const file = project.files[absPath];
                 if (file) {
                     const blob = new Blob([file.content], { type: 'text/css' });

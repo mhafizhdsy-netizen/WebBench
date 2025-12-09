@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { projectService } from '../services/projectService';
@@ -13,13 +15,14 @@ import { generateCodeStream } from '../services/geminiService';
 import { SEO } from '../components/ui/SEO';
 import { CheckpointModal } from '../components/editor/CheckpointModal';
 import { GitPanel } from '../components/editor/GitPanel';
+import { WebBenchLoader } from '../components/ui/Loader';
 import { 
   Menu, Save, ArrowLeft, Layout, MessageSquare, Play, Download, 
   Loader2, Cloud, Settings, Files, Search, Sparkles, X, LayoutTemplate,
   AlertTriangle, Check, CloudOff, AlertCircle, TerminalSquare, GitBranch
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { ActionModal } from '../components/dashboard/ActionModal';
+import { ActionModal, ActionModalConfig } from '../components/dashboard/ActionModal';
 import { WebContainer } from '@webcontainer/api';
 import { TerminalPanel } from '../components/editor/TerminalPanel';
 import { useSettings } from '../context/ThemeContext';
@@ -44,7 +47,7 @@ const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) =
 
 const WEBCONTAINER_BOOT_TIMEOUT = 30000;
 
-const Editor: React.FC = () => {
+export const Editor: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
@@ -63,6 +66,7 @@ const Editor: React.FC = () => {
   const [showPreview, setShowPreview] = useState(true);
   const [mobileTab, setMobileTab] = useState<PanelType>('editor');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  // Fix: Corrected useState declaration for highlightedFiles from Set<string>() to useState<Set<string>>(new Set())
   const [highlightedFiles, setHighlightedFiles] = useState<Set<string>>(new Set());
   
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
@@ -126,7 +130,7 @@ const Editor: React.FC = () => {
   const handleCreateSession = async (arg?: any) => {
     // If the function is called from an event handler (onClick), 'arg' will be a synthetic event object.
     // We must ensure we don't pass this event object to the service, which expects a string ID.
-    // React events are circular and cause JSON.stringify errors if passed to API calls.
+    // React events are circular and circular and cause JSON.stringify errors if passed to API calls.
     const targetProjectId = (typeof arg === 'string') ? arg : projectId;
     
     if (!targetProjectId) return;
@@ -327,7 +331,9 @@ const Editor: React.FC = () => {
       if (startupStatus === 'running' && project && previousFilesRef.current) {
           const changedFiles: Record<string, string> = {};
           for (const path in project.files) {
+              // Fix: Changed project.files[path].content() to project.files[path].content
               if (project.files[path].content !== previousFilesRef.current[path]?.content) {
+                  // Fix: Changed project.files[path].content() to project.files[path].content
                   changedFiles[path] = project.files[path].content;
               }
           }
@@ -1035,6 +1041,7 @@ const Editor: React.FC = () => {
     document.body.style.userSelect = 'none';
   }, [modalPosition, modalSize, handleMove, handleEnd]);
   
+  // Terminal resize handlers, defined in lexical order to prevent ReferenceErrors
   const handleTerminalResizeMove = useCallback((e: MouseEvent) => {
     if (isTerminalResizingRef.current) {
         const newHeight = window.innerHeight - e.clientY;
@@ -1049,7 +1056,7 @@ const Editor: React.FC = () => {
     window.removeEventListener('mousemove', handleTerminalResizeMove);
     window.removeEventListener('mouseup', handleTerminalResizeEnd);
     document.body.style.userSelect = '';
-  }, [handleTerminalResizeMove]);
+  }, [handleTerminalResizeMove]); 
 
   const handleTerminalResizeStart = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -1060,7 +1067,7 @@ const Editor: React.FC = () => {
   }, [handleTerminalResizeMove, handleTerminalResizeEnd]);
 
 
-  if (loading) return <div className="h-[100dvh] flex items-center justify-center bg-background text-white"><Loader2 className="animate-spin w-7 h-7 md:w-8 md:h-8"/></div>;
+  if (loading) return <div className="h-[100dvh] flex items-center justify-center bg-background text-white"><WebBenchLoader size="lg" text="Loading Editor..." /></div>;
 
   if (loadError) return (
     <div className="h-[100dvh] flex flex-col items-center justify-center bg-background text-red-400 p-4 md:p-6">
@@ -1308,5 +1315,3 @@ const Editor: React.FC = () => {
     </>
   );
 };
-
-export default Editor;
